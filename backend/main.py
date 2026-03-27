@@ -4,12 +4,41 @@ from fastapi import Depends, HTTPException, status
 from sqlalchemy.orm import Session
 import schemas
 import security
-from database import get_db
+
 # Importujemy bazę danych i modele
-from database import engine, Base
+from database import engine, Base, get_db, SessionLocal
 import models 
+
 #Generowanie tabel w bazie danych na podstawie modeli (jeśli jeszcze nie istnieją)
 models.Base.metadata.create_all(bind=engine) 
+
+#Funkcja AUTO-SEEDINGU
+def seed_db():
+    # Tworzymy ręcznie sesję tylko na potrzeby startu aplikacji
+    db = SessionLocal()
+    try:
+        # Sprawdzamy, czy w tabeli roles są już jakieś rekordy
+        role_count = db.query(models.Role).count()
+        if role_count == 0:
+            print("INFO: Tabela ról jest pusta. Rozpoczynam seeding...")
+            default_roles = [
+                models.Role(role_name="Klient"),
+                models.Role(role_name="Kurier"),
+                models.Role(role_name="Dyspozytor")
+            ]
+            db.add_all(default_roles)
+            db.commit()
+            print("SUCCESS: Role zostały dodane pomyślnie!")
+        else:
+            print(f"INFO: Znaleziono {role_count} ról. Pomijam seeding.")
+    except Exception as e:
+        print(f"ERROR: Błąd podczas seedingu: {e}")
+        db.rollback()
+    finally:
+        db.close()
+
+# Wykonujemy seeding zaraz po stworzeniu tabel
+seed_db()
 
 # Inicjalizacja aplikacji FastAPI
 app = FastAPI(
