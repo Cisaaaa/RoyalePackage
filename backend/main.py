@@ -2,7 +2,7 @@ import os
 from fastapi import FastAPI
 
 # Importujemy bazę danych i modele
-from database import engine
+from database import engine, Base
 import models 
 #Generowanie tabel w bazie danych na podstawie modeli (jeśli jeszcze nie istnieją)
 models.Base.metadata.create_all(bind=engine) 
