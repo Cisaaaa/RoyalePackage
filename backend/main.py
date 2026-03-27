@@ -1,6 +1,12 @@
 import os
 from fastapi import FastAPI
 
+# Importujemy bazę danych i modele
+from database import engine
+import models 
+#Generowanie tabel w bazie danych na podstawie modeli (jeśli jeszcze nie istnieją)
+models.Base.metadata.create_all(bind=engine) 
+
 # Inicjalizacja aplikacji FastAPI
 app = FastAPI(
     title="Royale Package API",
