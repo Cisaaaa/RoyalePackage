@@ -1,0 +1,40 @@
+# --- SEKRETY I KONFIGURACJA ---
+# Nigdy nie wysyłaj haseł na GitHub! 
+.env
+.env.local
+.env.*.local
+
+# --- PYTHON (Backend) ---
+# Ignorujemy pliki binarne i pamięć podręczną [cite: 362]
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.venv
+venv/
+ENV/
+build/
+dist-python/
+
+# --- NODE / VUE (Frontend) ---
+# Nie wysyłamy ciężkich bibliotek, każdy zainstaluje je u siebie przez Docker 
+node_modules/
+dist/
+*.local
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# --- DOCKER ---
+# Logi kontenerów 
+*.log
+docker-volumes/
+
+# --- IDE I SYSTEM ---
+# Pliki specyficzne dla edytorów kodu i systemów operacyjnych
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
