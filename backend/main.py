@@ -1,6 +1,7 @@
 import os
 from fastapi import FastAPI
 from fastapi import Depends, HTTPException, status
+from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 import schemas
 import security
@@ -97,3 +98,30 @@ def register_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
     db.refresh(new_user)
 
     return new_user
+
+@app.post("/api/v1/login", summary="Logowanie i pobranie tokena JWT")
+def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
+    """
+    Endpoint weryfikujący email i hasło. Jeśli poprawne, zwraca Token JWT.
+    """
+    # 1. Szukamy użytkownika po adresie email (Swagger podaje go w polu 'username')
+    user = db.query(models.User).filter(models.User.email == form_data.username).first()
+    
+    # 2. Sprawdzamy czy user istnieje i czy hasło się zgadza
+    if not user or not security.verify_password(form_data.password, user.password_hash):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Nieprawidłowy email lub hasło",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    
+    # 3. Tworzymy paczkę danych do tokena (dodajemy rolę, przyda się Dominikowi na frontendzie!)
+    token_data = {
+        "sub": user.email,
+        "role_id": user.role_id
+    }
+    
+    # 4. Drukujemy token
+    access_token = security.create_access_token(data=token_data)
+    
+    return {"access_token": access_token, "token_type": "bearer"}
