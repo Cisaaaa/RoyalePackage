@@ -5,6 +5,7 @@ from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 import schemas
 import security
+from fastapi.middleware.cors import CORSMiddleware
 
 # Importujemy bazę danych i modele
 from database import engine, Base, get_db, SessionLocal
@@ -46,6 +47,15 @@ app = FastAPI(
     title="Royale Package API",
     description="API dla systemu logistycznego",
     version="1.0.0"
+)
+
+# Dodajemy obsługę CORS, żeby frontend (Vue.js) mógł z nami gadać
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"], # Wpuszczamy tylko nasz frontend!
+    allow_credentials=True,
+    allow_methods=["*"], # Pozwalamy na wszystko
+    allow_headers=["*"], # Pozwalamy na przesyłanie tokenów
 )
 
 # Pobieranie adresu bazy danych ze zmiennych środowiskowych (przekazanych przez Dockera)
