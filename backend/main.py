@@ -125,3 +125,17 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depend
     access_token = security.create_access_token(data=token_data)
     
     return {"access_token": access_token, "token_type": "bearer"}
+
+# Przykładowy chroniony endpoint, który wymaga tokena JWT
+@app.get("/api/v1/users/me", summary="Pobierz dane aktualnie zalogowanego użytkownika")
+def get_me(current_user_email: str = Depends(security.get_current_user_email)): 
+    """
+    Endpoint chroniony - wymaga tokena JWT.
+    """
+
+    return {
+        "status": "authorized",
+        "user_email": current_user_email,
+        "message": "To jest chroniony endpoint. Jeśli widzisz ten komunikat, token JWT jest poprawny!"
+    }
+           
