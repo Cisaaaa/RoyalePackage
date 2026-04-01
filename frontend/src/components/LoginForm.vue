@@ -36,11 +36,7 @@
           </v-row>
 
           <p class="text-caption text-grey-lighten-1 mb-1 font-weight-bold text-uppercase">Adres E-mail</p>
-          <v-text-field v-model="email" :rules="[rules.required, rules.email]" prepend-inner-icon="mdi-email-outline" placeholder="jan.kowalski@email.pl" variant="solo-filled" bg-color="#1E293B" color="#E5B338" base-color="transparent" required class="mb-2 custom-input"></v-text-field>
-
-          <p class="text-caption text-grey-lighten-1 mb-1 font-weight-bold text-uppercase">Adres Dostawy</p>
-          <v-text-field v-model="address" :rules="[rules.required]" prepend-inner-icon="mdi-map-marker-outline" placeholder="ul. Marszałkowska 1/2, 00-001 Warszawa" variant="solo-filled" bg-color="#1E293B" color="#E5B338" base-color="transparent" class="custom-input hide-bottom-space"></v-text-field>
-          <p class="text-grey-darken-1 mb-4 mt-1" style="font-size: 0.7rem;">Będzie używany jako domyślny adres dostawy</p>
+          <v-text-field v-model="email" :rules="[rules.required, rules.email]" prepend-inner-icon="mdi-email-outline" placeholder="jan.kowalski@email.pl" variant="solo-filled" bg-color="#1E293B" color="#E5B338" base-color="transparent" required class="mb-4 custom-input"></v-text-field>
 
           <p class="text-caption text-grey-lighten-1 mb-1 font-weight-bold text-uppercase">Hasło</p>
           <v-text-field v-model="password" :rules="[rules.required, rules.passwordLength]" prepend-inner-icon="mdi-lock-outline" placeholder="Minimum 8 znaków" :type="showPassword ? 'text' : 'password'" :append-inner-icon="showPassword ? 'mdi-eye-off' : 'mdi-eye'" @click:append-inner="showPassword = !showPassword" variant="solo-filled" bg-color="#1E293B" color="#E5B338" base-color="transparent" required class="mb-2 custom-input"></v-text-field>
@@ -87,23 +83,19 @@ import axios from 'axios';
 const emit = defineEmits(['login-success']);
 
 const isLoginMode = ref(false);
-const isFormValid = ref(false); // Zmienna śledząca czy formularz jest bezbłędny
+const isFormValid = ref(false); 
 
 const email = ref('');
 const password = ref('');
 const confirmPassword = ref('');
 const fullName = ref('');
 const phone = ref('');
-const address = ref('');
 const showPassword = ref(false);
 const showConfirmPassword = ref(false);
 const message = ref('');
 const isError = ref(false);
 const isLoading = ref(false);
 
-// ==========================================
-// MOZG WALIDACJI (REGUŁY)
-// ==========================================
 const rules = {
   required: (v: string) => !!v || 'To pole jest wymagane',
   email: (v: string) => /.+@.+\..+/.test(v) || 'Wpisz poprawny adres e-mail (np. jan@test.pl)',
@@ -112,18 +104,16 @@ const rules = {
   phone: (v: string) => /^[0-9\s\-\+]{9,15}$/.test(v) || 'Wpisz poprawny numer telefonu'
 };
 
-// Funkcja do czyszczenia formularza przy zmianie trybu Logowanie/Rejestracja
 const switchMode = (toLogin: boolean) => {
   isLoginMode.value = toLogin;
   message.value = '';
   isError.value = false;
-  // Czyścimy hasła przy przełączaniu zakładek ze względów bezpieczeństwa
   password.value = '';
   confirmPassword.value = '';
 };
 
 const handleSubmit = async () => {
-  if (!isFormValid.value) return; // Podwójne zabezpieczenie przed kliknięciem
+  if (!isFormValid.value) return; 
 
   isLoading.value = true;
   message.value = '';
@@ -198,7 +188,6 @@ const handleSubmit = async () => {
   box-shadow: inset 0 2px 4px rgba(0,0,0,0.3) !important;
 }
 
-/* Dostosowanie odstępu na błędy pod inputem */
 .custom-input :deep(.v-messages) {
   padding-left: 4px;
   opacity: 1 !important;
