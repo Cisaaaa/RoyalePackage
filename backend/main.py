@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 import schemas
 import security
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
 
 # Importujemy bazę danych i modele
 from database import engine, Base, get_db, SessionLocal
@@ -14,33 +15,125 @@ import models
 #Generowanie tabel w bazie danych na podstawie modeli (jeśli jeszcze nie istnieją)
 models.Base.metadata.create_all(bind=engine) 
 
-#Funkcja AUTO-SEEDINGU
+# Funkcja AUTO-SEEDINGU
 def seed_db():
-    # Tworzymy ręcznie sesję tylko na potrzeby startu aplikacji
     db = SessionLocal()
     try:
-        # Sprawdzamy, czy w tabeli roles są już jakieś rekordy
-        role_count = db.query(models.Role).count()
-        if role_count == 0:
-            print("INFO: Tabela ról jest pusta. Rozpoczynam seeding...")
-            default_roles = [
+        # 1. ROLE UŻYTKOWNIKÓW
+        if db.query(models.Role).count() == 0:
+            print("INFO: Tabela ról jest pusta. Dodaję role...")
+            db.add_all([
                 models.Role(role_name="Klient"),
                 models.Role(role_name="Kurier"),
                 models.Role(role_name="Dyspozytor")
-            ]
-            db.add_all(default_roles)
+            ])
             db.commit()
-            print("SUCCESS: Role zostały dodane pomyślnie!")
-        else:
-            print(f"INFO: Znaleziono {role_count} ról. Pomijam seeding.")
+            print("SUCCESS: Role dodane!")
+
+        # 2. STATUSY PACZEK
+        if db.query(models.Status).count() == 0:
+            print("INFO: Tabela statusów jest pusta. Dodaję statusy...")
+            db.add_all([
+                models.Status(status_name="Zarejestrowana"),
+                models.Status(status_name="W magazynie nadawczym"),
+                models.Status(status_name="W drodze"),
+                models.Status(status_name="Wydana kurierowi"),
+                models.Status(status_name="Dostarczona")
+            ])
+            db.commit()
+            print("SUCCESS: Statusy dodane!")
+
+        # 3. TARYFY / GABARYTY
+        if db.query(models.DimensionalTariff).count() == 0:
+            print("INFO: Tabela taryf jest pusta. Dodaję cennik...")
+            db.add_all([
+                models.DimensionalTariff(size_category="A", max_weight_kg=5.0, base_price=15.99),
+                models.DimensionalTariff(size_category="B", max_weight_kg=15.0, base_price=20.99),
+                models.DimensionalTariff(size_category="C", max_weight_kg=30.0, base_price=29.99)
+            ])
+            db.commit()
+            print("SUCCESS: Taryfy dodane!")
+
+        # 4. DOMYŚLNY MAGAZYN (Wymagany do logistyki)
+        if db.query(models.Warehouse).count() == 0:
+            print("INFO: Brak magazynów. Tworzę główny HUB...")
+            
+            # Najpierw tworzymy Region
+            region = models.Region(region_name="Mazowieckie")
+            db.add(region)
+            db.commit()
+            db.refresh(region)
+
+            # Potem tworzymy fizyczny adres dla Magazynu (bez współrzędnych na razie)
+            address = models.Address(
+                street="ul. Logistyczna",
+                building_number="1",
+                city="Warszawa",
+                postal_code="00-001"
+            )
+            db.add(address)
+            db.commit()
+            db.refresh(address)
+
+            # Na końcu sam Magazyn, przypinając do niego ID adresu i regionu
+            warehouse = models.Warehouse(
+                address_id=address.address_id,
+                region_id=region.region_id,
+                name="HUB Centralny Warszawa",
+                type="HUB"
+            )
+            db.add(warehouse)
+            db.commit()
+            print("SUCCESS: Główny HUB dodany!")
+
     except Exception as e:
         print(f"ERROR: Błąd podczas seedingu: {e}")
         db.rollback()
     finally:
         db.close()
 
-# Wykonujemy seeding zaraz po stworzeniu tabel
+# Funkcja instalująca Triggery w PostgreSQL
+def setup_triggers():
+    db = SessionLocal()
+    try:
+        print("INFO: Instalowanie triggerów bazy danych...")
+        
+        # 1. Tworzymy funkcję w języku bazy danych (PL/pgSQL)
+        db.execute(text("""
+            CREATE OR REPLACE FUNCTION log_parcel_history()
+            RETURNS TRIGGER AS $$
+            BEGIN
+                -- Wykonaj tylko przy nowej paczce (INSERT) LUB gdy zmienił się status (UPDATE)
+                IF (TG_OP = 'INSERT') OR (TG_OP = 'UPDATE' AND NEW.status_id IS DISTINCT FROM OLD.status_id) THEN
+                    INSERT INTO parcel_history (parcel_id, status_id, warehouse_id, updated_at)
+                    VALUES (NEW.parcel_id, NEW.status_id, NEW.current_warehouse_id, NOW());
+                END IF;
+                
+                RETURN NEW;
+            END;
+            $$ LANGUAGE plpgsql;
+        """))
+        
+        # 2. Tworzymy sam wyzwalacz, który 'nasłuchuje' tabeli parcels
+        db.execute(text("""
+            DROP TRIGGER IF EXISTS trigger_log_parcel_history ON parcels;
+            CREATE TRIGGER trigger_log_parcel_history
+            AFTER INSERT OR UPDATE ON parcels
+            FOR EACH ROW
+            EXECUTE FUNCTION log_parcel_history();
+        """))
+        
+        db.commit()
+        print("SUCCESS: Magia bazy danych (Triggery) działa!")
+    except Exception as e:
+        print(f"ERROR: Błąd instalacji triggerów: {e}")
+        db.rollback()
+    finally:
+        db.close()
+
+# W tym miejscu wywołujesmy nasze funkcje
 seed_db()
+setup_triggers()
 
 # Inicjalizacja aplikacji FastAPI
 app = FastAPI(
