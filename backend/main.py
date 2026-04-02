@@ -14,25 +14,77 @@ import models
 #Generowanie tabel w bazie danych na podstawie modeli (jeśli jeszcze nie istnieją)
 models.Base.metadata.create_all(bind=engine) 
 
-#Funkcja AUTO-SEEDINGU
+# Funkcja AUTO-SEEDINGU
 def seed_db():
-    # Tworzymy ręcznie sesję tylko na potrzeby startu aplikacji
     db = SessionLocal()
     try:
-        # Sprawdzamy, czy w tabeli roles są już jakieś rekordy
-        role_count = db.query(models.Role).count()
-        if role_count == 0:
-            print("INFO: Tabela ról jest pusta. Rozpoczynam seeding...")
-            default_roles = [
+        # 1. ROLE UŻYTKOWNIKÓW
+        if db.query(models.Role).count() == 0:
+            print("INFO: Tabela ról jest pusta. Dodaję role...")
+            db.add_all([
                 models.Role(role_name="Klient"),
                 models.Role(role_name="Kurier"),
                 models.Role(role_name="Dyspozytor")
-            ]
-            db.add_all(default_roles)
+            ])
             db.commit()
-            print("SUCCESS: Role zostały dodane pomyślnie!")
-        else:
-            print(f"INFO: Znaleziono {role_count} ról. Pomijam seeding.")
+            print("SUCCESS: Role dodane!")
+
+        # 2. STATUSY PACZEK
+        if db.query(models.Status).count() == 0:
+            print("INFO: Tabela statusów jest pusta. Dodaję statusy...")
+            db.add_all([
+                models.Status(status_name="Zarejestrowana"),
+                models.Status(status_name="W magazynie nadawczym"),
+                models.Status(status_name="W drodze"),
+                models.Status(status_name="Wydana kurierowi"),
+                models.Status(status_name="Dostarczona")
+            ])
+            db.commit()
+            print("SUCCESS: Statusy dodane!")
+
+        # 3. TARYFY / GABARYTY
+        if db.query(models.DimensionalTariff).count() == 0:
+            print("INFO: Tabela taryf jest pusta. Dodaję cennik...")
+            db.add_all([
+                models.DimensionalTariff(size_category="A", max_weight_kg=5.0, base_price=15.99),
+                models.DimensionalTariff(size_category="B", max_weight_kg=15.0, base_price=20.99),
+                models.DimensionalTariff(size_category="C", max_weight_kg=30.0, base_price=29.99)
+            ])
+            db.commit()
+            print("SUCCESS: Taryfy dodane!")
+
+        # 4. DOMYŚLNY MAGAZYN (Wymagany do logistyki)
+        if db.query(models.Warehouse).count() == 0:
+            print("INFO: Brak magazynów. Tworzę główny HUB...")
+            
+            # Najpierw tworzymy Region
+            region = models.Region(region_name="Mazowieckie")
+            db.add(region)
+            db.commit()
+            db.refresh(region)
+
+            # Potem tworzymy fizyczny adres dla Magazynu (bez współrzędnych na razie)
+            address = models.Address(
+                street="ul. Logistyczna",
+                building_number="1",
+                city="Warszawa",
+                postal_code="00-001"
+            )
+            db.add(address)
+            db.commit()
+            db.refresh(address)
+
+            # Na końcu sam Magazyn, przypinając do niego ID adresu i regionu
+            warehouse = models.Warehouse(
+                address_id=address.address_id,
+                region_id=region.region_id,
+                name="HUB Centralny Warszawa",
+                type="HUB"
+            )
+            db.add(warehouse)
+            db.commit()
+            print("SUCCESS: Główny HUB dodany!")
+
     except Exception as e:
         print(f"ERROR: Błąd podczas seedingu: {e}")
         db.rollback()
