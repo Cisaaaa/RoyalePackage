@@ -94,6 +94,9 @@ class Parcel(Base):
     parcel_id = Column(Integer, primary_key=True, index=True)
     tracking_number = Column(String(50), unique=True, index=True, nullable=False)
     
+    # --- NOWE POLE: Aktualny status paczki ---
+    status_id = Column(Integer, ForeignKey("statuses.status_id"), nullable=False, default=1)
+
     # Klucze obce - trzymają paczkę w ryzach
     sender_id = Column(Integer, ForeignKey("users.user_id"), nullable=False)
     sender_address_id = Column(Integer, ForeignKey("addresses.address_id"), nullable=False)

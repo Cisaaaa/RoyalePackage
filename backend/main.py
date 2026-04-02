@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 import schemas
 import security
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
 
 # Importujemy bazę danych i modele
 from database import engine, Base, get_db, SessionLocal
@@ -91,8 +92,48 @@ def seed_db():
     finally:
         db.close()
 
-# Wykonujemy seeding zaraz po stworzeniu tabel
+# Funkcja instalująca Triggery w PostgreSQL
+def setup_triggers():
+    db = SessionLocal()
+    try:
+        print("INFO: Instalowanie triggerów bazy danych...")
+        
+        # 1. Tworzymy funkcję w języku bazy danych (PL/pgSQL)
+        db.execute(text("""
+            CREATE OR REPLACE FUNCTION log_parcel_history()
+            RETURNS TRIGGER AS $$
+            BEGIN
+                -- Wykonaj tylko przy nowej paczce (INSERT) LUB gdy zmienił się status (UPDATE)
+                IF (TG_OP = 'INSERT') OR (TG_OP = 'UPDATE' AND NEW.status_id IS DISTINCT FROM OLD.status_id) THEN
+                    INSERT INTO parcel_history (parcel_id, status_id, warehouse_id, updated_at)
+                    VALUES (NEW.parcel_id, NEW.status_id, NEW.current_warehouse_id, NOW());
+                END IF;
+                
+                RETURN NEW;
+            END;
+            $$ LANGUAGE plpgsql;
+        """))
+        
+        # 2. Tworzymy sam wyzwalacz, który 'nasłuchuje' tabeli parcels
+        db.execute(text("""
+            DROP TRIGGER IF EXISTS trigger_log_parcel_history ON parcels;
+            CREATE TRIGGER trigger_log_parcel_history
+            AFTER INSERT OR UPDATE ON parcels
+            FOR EACH ROW
+            EXECUTE FUNCTION log_parcel_history();
+        """))
+        
+        db.commit()
+        print("SUCCESS: Magia bazy danych (Triggery) działa!")
+    except Exception as e:
+        print(f"ERROR: Błąd instalacji triggerów: {e}")
+        db.rollback()
+    finally:
+        db.close()
+
+# W tym miejscu wywołujesmy nasze funkcje
 seed_db()
+setup_triggers()
 
 # Inicjalizacja aplikacji FastAPI
 app = FastAPI(
