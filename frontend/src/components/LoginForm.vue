@@ -27,16 +27,16 @@
           <v-row dense>
             <v-col cols="12" sm="6">
               <p class="text-caption text-grey-lighten-1 mb-1 font-weight-bold text-uppercase">Imię i Nazwisko</p>
-              <v-text-field v-model="fullName" :rules="[rules.required]" prepend-inner-icon="mdi-account-outline" placeholder="Jan Kowalski" variant="solo-filled" bg-color="#1E293B" color="#E5B338" base-color="transparent" class="mb-2 custom-input"></v-text-field>
+              <v-text-field v-model="fullName" :rules="[rules.required, rules.nameLength]" counter="100" prepend-inner-icon="mdi-account-outline" placeholder="Jan Kowalski" variant="solo-filled" bg-color="#1E293B" color="#E5B338" base-color="transparent" class="mb-2 custom-input"></v-text-field>
             </v-col>
             <v-col cols="12" sm="6">
               <p class="text-caption text-grey-lighten-1 mb-1 font-weight-bold text-uppercase">Telefon</p>
-              <v-text-field v-model="phone" :rules="[rules.required, rules.phone]" prepend-inner-icon="mdi-phone-outline" placeholder="600 123 456" variant="solo-filled" bg-color="#1E293B" color="#E5B338" base-color="transparent" class="mb-2 custom-input"></v-text-field>
+              <v-text-field v-model="phone" :rules="[rules.required, rules.phone]" prepend-inner-icon="mdi-phone-outline" placeholder="np. 111 222 333 lub 111222333" variant="solo-filled" bg-color="#1E293B" color="#E5B338" base-color="transparent" class="mb-2 custom-input"></v-text-field>
             </v-col>
           </v-row>
 
           <p class="text-caption text-grey-lighten-1 mb-1 font-weight-bold text-uppercase">Adres E-mail</p>
-          <v-text-field v-model="email" :rules="[rules.required, rules.email]" prepend-inner-icon="mdi-email-outline" placeholder="jan.kowalski@email.pl" variant="solo-filled" bg-color="#1E293B" color="#E5B338" base-color="transparent" required class="mb-4 custom-input"></v-text-field>
+          <v-text-field v-model="email" :rules="[rules.required, rules.email, rules.emailLength]" counter="100" prepend-inner-icon="mdi-email-outline" placeholder="jan.kowalski@email.pl" variant="solo-filled" bg-color="#1E293B" color="#E5B338" base-color="transparent" required class="mb-4 custom-input"></v-text-field>
 
           <p class="text-caption text-grey-lighten-1 mb-1 font-weight-bold text-uppercase">Hasło</p>
           <v-text-field v-model="password" :rules="[rules.required, rules.passwordLength]" prepend-inner-icon="mdi-lock-outline" placeholder="Minimum 8 znaków" :type="showPassword ? 'text' : 'password'" :append-inner-icon="showPassword ? 'mdi-eye-off' : 'mdi-eye'" @click:append-inner="showPassword = !showPassword" variant="solo-filled" bg-color="#1E293B" color="#E5B338" base-color="transparent" required class="mb-2 custom-input"></v-text-field>
@@ -99,9 +99,15 @@ const isLoading = ref(false);
 const rules = {
   required: (v: string) => !!v || 'To pole jest wymagane',
   email: (v: string) => /.+@.+\..+/.test(v) || 'Wpisz poprawny adres e-mail (np. jan@test.pl)',
-  passwordLength: (v: string) => (v && v.length >= 8) || 'Hasło musi mieć minimum 8 znaków',
+  emailLength: (v: string) => (v && v.length <= 100) || 'E-mail może mieć maksymalnie 100 znaków',
+  passwordLength: (v: string) => (v && v.length >= 8 && v.length <= 128) || 'Hasło musi mieć od 8 do 128 znaków',
   passwordMatch: (v: string) => v === password.value || 'Hasła nie są identyczne',
-  phone: (v: string) => /^[0-9\s\-\+]{9,15}$/.test(v) || 'Wpisz poprawny numer telefonu'
+  nameLength: (v: string) => (v && v.length >= 2 && v.length <= 100) || 'Imię i nazwisko musi mieć od 2 do 100 znaków',
+  phone: (v: string) => {
+   if (!v) return true;
+    const digitsOnly = v.replace(/\D/g, '');
+    return (digitsOnly.length >= 9 && digitsOnly.length <= 15) || 'Wpisz poprawny numer telefonu (9-15 cyfr)';
+   }
 };
 
 const switchMode = (toLogin: boolean) => {
