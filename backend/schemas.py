@@ -1,4 +1,5 @@
-from pydantic import BaseModel
+import re
+from pydantic import BaseModel, Field, field_validator
 
 # 1. Schemat wejściowy (czego oczekujemy przy rejestracji)
 class UserCreate(BaseModel):
