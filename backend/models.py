@@ -28,6 +28,8 @@ class User(Base):
     last_name = Column(String(100), nullable=False)
     phone = Column(String(20), nullable=True)
 
+    refresh_token = Column(String(255), nullable=True) # Do przechowywania tokena odświeżającego
+
     # Relacja zwrotna
     role = relationship("Role", back_populates="users")
 
@@ -125,3 +127,18 @@ class ParcelHistory(Base):
     
     # Automatyczny znacznik czasu - serwer DB sam wklepie aktualną datę co do milisekundy
     updated_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+# ==========================================
+#                Płatności
+# ==========================================
+
+class Payment(Base):
+    __tablename__ = "payments"
+
+    payment_id = Column(Integer, primary_key=True, index=True)
+    parcel_id = Column(Integer, ForeignKey("parcels.parcel_id"))
+    payer_id = Column(Integer, ForeignKey("users.user_id"))
+    amount = Column(Float)
+    status = Column(String(50), default="PENDING") # PENDING lub PAID
+    transaction_date = Column(DateTime(timezone=True), server_default=func.now())

@@ -7,6 +7,7 @@ import schemas
 import security
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
+import random
 
 # Importujemy bazę danych i modele
 from database import engine, Base, get_db, SessionLocal
@@ -202,15 +203,10 @@ def register_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
 
     return new_user
 
-@app.post("/api/v1/login", summary="Logowanie i pobranie tokena JWT")
+@app.post("/api/v1/login", summary="Logowanie (Generowanie Access i Refresh Token)")
 def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
-    """
-    Endpoint weryfikujący email i hasło. Jeśli poprawne, zwraca Token JWT.
-    """
-    # 1. Szukamy użytkownika po adresie email (Swagger podaje go w polu 'username')
     user = db.query(models.User).filter(models.User.email == form_data.username).first()
     
-    # 2. Sprawdzamy czy user istnieje i czy hasło się zgadza
     if not user or not security.verify_password(form_data.password, user.password_hash):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -218,17 +214,23 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depend
             headers={"WWW-Authenticate": "Bearer"},
         )
     
-    # 3. Tworzymy paczkę danych do tokena (dodajemy rolę, przyda się Dominikowi na frontendzie!)
-    token_data = {
-        "sub": user.email,
-        "role_id": user.role_id
-    }
+    # Tworzymy paczkę dla Access Tokena (z rolami)
+    token_data = {"sub": user.email, "role_id": user.role_id}
     
-    # 4. Drukujemy token
+    # GENERUJEMY OBA TOKENY
     access_token = security.create_access_token(data=token_data)
+    refresh_token = security.create_refresh_token(data=token_data)
     
-    return {"access_token": access_token, "token_type": "bearer"}
-
+    # Zapisujemy Refresh Token bezpiecznie w bazie danych
+    user.refresh_token = refresh_token
+    db.commit()
+    
+    # Zwracamy zestaw klientowi (Frontendowi)
+    return {
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+        "token_type": "bearer"
+    }
 # Przykładowy chroniony endpoint, który wymaga tokena JWT
 @app.get("/api/v1/users/me", summary="Pobierz dane aktualnie zalogowanego użytkownika")
 def get_me(current_user_email: str = Depends(security.get_current_user_email)): 
@@ -242,3 +244,81 @@ def get_me(current_user_email: str = Depends(security.get_current_user_email)):
         "message": "To jest chroniony endpoint. Jeśli widzisz ten komunikat, token JWT jest poprawny!"
     }
            
+
+# NADAWANIE PACZEK!!!!!!!!
+
+@app.post("/api/v1/parcels", response_model=schemas.ParcelResponse, status_code=status.HTTP_201_CREATED, summary="Nadaj nową paczkę")
+def create_parcel(
+    parcel_data: schemas.ParcelCreate, 
+    db: Session = Depends(get_db),
+    current_user_email: str = Depends(security.get_current_user_email) # Ochroniarz: tylko zalogowani!
+):
+    """
+    Endpoint do tworzenia nowej przesyłki przez zalogowanego klienta.
+    Zapisuje adresy, wylicza cenę i tworzy główny rekord.
+    """
+    # 1. Identyfikacja klienta
+    user = db.query(models.User).filter(models.User.email == current_user_email).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="Nie znaleziono użytkownika")
+    
+    # 2. Pobranie cennika (żeby frontend nas nie oszukał wysyłając własną cenę)
+    tariff = db.query(models.DimensionalTariff).filter(models.DimensionalTariff.tariff_id == parcel_data.tariff_id).first()
+    if not tariff:
+        raise HTTPException(status_code=404, detail="Wybrany gabaryt nie istnieje")
+    
+    # 3. Tworzymy i zapisujemy adresy
+    sender_address = models.Address(
+        street=parcel_data.sender_address.street,
+        building_number=parcel_data.sender_address.building_number, 
+        city=parcel_data.sender_address.city,
+        postal_code=parcel_data.sender_address.postal_code
+    )
+    recipient_address = models.Address(
+        street=parcel_data.recipient_address.street,
+        building_number=parcel_data.recipient_address.building_number,
+        city=parcel_data.recipient_address.city,
+        postal_code=parcel_data.recipient_address.postal_code
+    )
+
+    db.add(sender_address)
+    db.add(recipient_address)
+    db.flush() # Wymuszamy wygenerowanie ID dla adresów, zanim stworzymy paczkę
+
+    # 4. generowanie unikalnego numeru przesyłki
+    while True:
+        tracking_num = f"RP{random.randint(1000000, 9999999)}PL"
+        existing_parcel = db.query(models.Parcel).filter(models.Parcel.tracking_number == tracking_num).first()
+        if not existing_parcel:
+            break # Numer jest wolny, wychodzimy z pętli!
+
+    # 5. Złożenie paczki w całość
+    new_parcel = models.Parcel(
+        tracking_number=tracking_num,
+        sender_id=user.user_id,
+        sender_address_id=sender_address.address_id,
+        recipient_address_id=recipient_address.address_id,
+        recipient_phone=parcel_data.recipient_phone, # Oczyszczony przez Pydantic!
+        tariff_id=parcel_data.tariff_id,
+        calculated_price=tariff.base_price,
+        current_warehouse_id=1, # Zgodnie z Auto-Seedingiem, ID 1 to nasz HUB Warszawa
+        status_id=1 # 1 = Zarejestrowana
+    )
+    db.add(new_parcel)
+
+    # 6. Zapis (Trigger PostgreSQL wyłapuje INSERT i tworzy nowy rekord w historii!)
+    db.commit()
+    db.refresh(new_parcel)
+
+    # 7. Symulacja płatności
+    if parcel_data.simulate_payment:
+        payment = models.Payment(
+            parcel_id=new_parcel.parcel_id,
+            payer_id=user.user_id,
+            amount=tariff.base_price,
+            status="PENDING" # czeka na opłacenie
+        )
+        db.add(payment)
+        db.commit()
+
+    return new_parcel
