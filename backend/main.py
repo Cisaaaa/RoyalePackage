@@ -203,15 +203,10 @@ def register_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
 
     return new_user
 
-@app.post("/api/v1/login", summary="Logowanie i pobranie tokena JWT")
+@app.post("/api/v1/login", summary="Logowanie (Generowanie Access i Refresh Token)")
 def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
-    """
-    Endpoint weryfikujący email i hasło. Jeśli poprawne, zwraca Token JWT.
-    """
-    # 1. Szukamy użytkownika po adresie email (Swagger podaje go w polu 'username')
     user = db.query(models.User).filter(models.User.email == form_data.username).first()
     
-    # 2. Sprawdzamy czy user istnieje i czy hasło się zgadza
     if not user or not security.verify_password(form_data.password, user.password_hash):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -219,17 +214,23 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depend
             headers={"WWW-Authenticate": "Bearer"},
         )
     
-    # 3. Tworzymy paczkę danych do tokena (dodajemy rolę, przyda się Dominikowi na frontendzie!)
-    token_data = {
-        "sub": user.email,
-        "role_id": user.role_id
-    }
+    # Tworzymy paczkę dla Access Tokena (z rolami)
+    token_data = {"sub": user.email, "role_id": user.role_id}
     
-    # 4. Drukujemy token
+    # GENERUJEMY OBA TOKENY
     access_token = security.create_access_token(data=token_data)
+    refresh_token = security.create_refresh_token(data=token_data)
     
-    return {"access_token": access_token, "token_type": "bearer"}
-
+    # Zapisujemy Refresh Token bezpiecznie w bazie danych
+    user.refresh_token = refresh_token
+    db.commit()
+    
+    # Zwracamy zestaw klientowi (Frontendowi)
+    return {
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+        "token_type": "bearer"
+    }
 # Przykładowy chroniony endpoint, który wymaga tokena JWT
 @app.get("/api/v1/users/me", summary="Pobierz dane aktualnie zalogowanego użytkownika")
 def get_me(current_user_email: str = Depends(security.get_current_user_email)): 
