@@ -79,9 +79,30 @@
           ></v-select>
         </v-col>
         <v-col cols="12" md="6" class="d-flex align-center justify-center pt-md-6">
-          <v-checkbox v-model="formData.simulate_payment" label="Potwierdzam opłatę z góry (Symulacja)" color="#E5B338" class="text-white font-weight-bold"></v-checkbox>
+          <v-checkbox v-model="formData.simulate_payment" label="Potwierdzam opłatę z góry (Symulacja)" color="#E5B338" class="text-white font-weight-bold" hide-details></v-checkbox>
         </v-col>
       </v-row>
+
+      <v-card variant="outlined" color="#E5B338" class="mb-8 rounded-lg pa-4 bg-transparent border-opacity-25">
+        <h4 class="text-white text-uppercase font-weight-bold mb-4 text-subtitle-2">Podsumowanie Kosztów</h4>
+        
+        <div class="d-flex justify-space-between mb-2">
+          <span class="text-grey-lighten-1">Cena bazowa (Kategoria {{ formData.tariff_id === 1 ? 'A' : formData.tariff_id === 2 ? 'B' : 'C' }}):</span>
+          <span class="text-white font-weight-bold">{{ basePrice.toFixed(2) }} zł</span>
+        </div>
+        
+        <div class="d-flex justify-space-between mb-2" v-if="!formData.simulate_payment">
+          <span class="text-grey-lighten-1">Opłata dodatkowa (Za pobraniem):</span>
+          <span class="text-white font-weight-bold">+ {{ codFee.toFixed(2) }} zł</span>
+        </div>
+
+        <v-divider class="my-3 border-opacity-25" color="#E5B338"></v-divider>
+        
+        <div class="d-flex justify-space-between align-center mt-2">
+          <span class="text-gold font-weight-bold text-h6">Do zapłaty:</span>
+          <span class="text-gold font-weight-black text-h5">{{ totalPrice.toFixed(2) }} zł</span>
+        </div>
+      </v-card>
 
       <v-btn 
         type="submit" 
@@ -104,36 +125,42 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue';
-import api from '../api/axios'; // Upewnij się, że ta ścieżka do naszego Obserwatora jest poprawna w Twoim projekcie
+import { ref, computed } from 'vue'; // Dodany import 'computed'
+import api from '../api/axios';
 
 const isFormValid = ref(false);
 const isLoading = ref(false);
 const serverMessage = ref('');
 
-// Ten obiekt wysyłamy do backendu. Zgadza się 1:1 z schemas.py
 const formData = ref({
   sender_name: '',
   sender_phone: '',
-  sender_address: {
-    street: '',
-    building_number: '',
-    city: '',
-    postal_code: ''
-  },
+  sender_address: { street: '', building_number: '', city: '', postal_code: '' },
   recipient_name: '',
   recipient_phone: '',
-  recipient_address: {
-    street: '',
-    building_number: '',
-    city: '',
-    postal_code: ''
-  },
+  recipient_address: { street: '', building_number: '', city: '', postal_code: '' },
   tariff_id: 1, 
   simulate_payment: false
 });
 
-// ZASADY WALIDACJI "NA ŻYWO" (Zgodne z Pydantic)
+// --- LOGIKA OBLICZANIA KOSZTÓW (REAKTYWNA) ---
+const basePrice = computed(() => {
+  if (formData.value.tariff_id === 1) return 15.99;
+  if (formData.value.tariff_id === 2) return 20.99;
+  if (formData.value.tariff_id === 3) return 29.99;
+  return 15.99;
+});
+
+const codFee = computed(() => {
+  // Jeśli klient opłaci z góry (checkbox true), dopłata wynosi 0 zł. W przeciwnym razie 5 zł.
+  return formData.value.simulate_payment ? 0 : 5.00;
+});
+
+const totalPrice = computed(() => {
+  return basePrice.value + codFee.value;
+});
+// ----------------------------------------------
+
 const rules = {
   required: (v: string) => !!v || 'To pole jest wymagane, nie możesz go pominąć',
   phone: (v: string) => {
@@ -148,7 +175,6 @@ const rules = {
 };
 
 const submitParcel = async () => {
-  // Jeśli na formularzu świeci się cokolwiek na czerwono, blokujemy wysyłkę
   if (!isFormValid.value) return;
   
   isLoading.value = true;
@@ -158,10 +184,6 @@ const submitParcel = async () => {
     const response = await api.post('/parcels', formData.value);
     
     serverMessage.value = `Sukces! Nadano paczkę. Twój numer śledzenia: ${response.data.tracking_number}`;
-    
-    // Opcjonalnie: czyścimy formularz po sukcesie
-    // formData.value.sender_name = '';
-    
   } catch (error: any) {
     if (error.response && error.response.status === 422) {
       serverMessage.value = 'Błąd Walidacji Serwera: Upewnij się, że wszystkie pola są poprawne.';

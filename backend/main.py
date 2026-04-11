@@ -326,54 +326,57 @@ def create_parcel(
         if not existing_parcel:
             break # Numer jest wolny, wychodzimy z pętli!
 
+    # --- NOWA LOGIKA CENNIKA ---
+    final_price = float(tariff.base_price)
+    COD_FEE = 5.00 # Stała dopłata za pobranie
+
+    # Jeśli klient NIE opłaca z góry (czyli wybiera pobranie), doliczamy 5 zł
+    if not parcel_data.simulate_payment:
+        final_price += COD_FEE
+
     # 5. Złożenie paczki w całość
     new_parcel = models.Parcel(
         tracking_number=tracking_num,
         sender_id=user.user_id,
         sender_address_id=sender_address.address_id,
         recipient_address_id=recipient_address.address_id,
-        recipient_phone=parcel_data.recipient_phone, # Oczyszczony przez Pydantic!
+        recipient_phone=parcel_data.recipient_phone,
         tariff_id=parcel_data.tariff_id,
-        calculated_price=tariff.base_price,
-        current_warehouse_id=1, # Zgodnie z Auto-Seedingiem, ID 1 to nasz HUB Warszawa
-        status_id=1 # 1 = Zarejestrowana
+        calculated_price=final_price, # Zapisujemy całkowitą cenę!
+        current_warehouse_id=1, 
+        status_id=1 
     )
     db.add(new_parcel)
-
-    # 6. Zapis (Trigger PostgreSQL wyłapuje INSERT i tworzy nowy rekord w historii!)
     db.commit()
     db.refresh(new_parcel)
 
     # 7. Symulacja płatności i Pobranie (COD)
     if parcel_data.simulate_payment:
-        # KLIENT ZAZNACZYŁ CHECKBOX: Płaci z góry
+        # Płaci z góry (bez dopłaty)
         payment = models.Payment(
             parcel_id=new_parcel.parcel_id,
             payer_id=user.user_id,
-            amount=tariff.base_price,
-            status="PAID" # Ustawiamy na zapłacone
+            amount=final_price, 
+            status="PAID" 
         )
         db.add(payment)
-        
-        # Upewniamy się, że paczka NIE jest za pobraniem
         new_parcel.is_cod = False 
         new_parcel.cod_amount = None
 
     else:
-        # KLIENT ODCZNACZYŁ CHECKBOX: Płaci przy odbiorze (Pobranie / COD)
+        # Płaci przy odbiorze (z dopłatą 5 zł)
         payment = models.Payment(
             parcel_id=new_parcel.parcel_id,
             payer_id=user.user_id,
-            amount=tariff.base_price,
-            status="PENDING" # Kurier musi odebrać gotówkę
+            amount=final_price, 
+            status="PENDING" 
         )
         db.add(payment)
         
-        # Ustawiamy paczkę jako "za pobraniem" i przypisujemy kwotę do pobrania
         new_parcel.is_cod = True
-        new_parcel.cod_amount = tariff.base_price # Kurier musi odebrać tyle, ile wynosi cena paczki
+        # Kurier musi pobrać od klienta całkowitą kwotę (cena bazowa + 5 zł dopłaty)
+        new_parcel.cod_amount = final_price 
 
-    # Finalny zapis
     db.commit()
     db.refresh(new_parcel)
 
