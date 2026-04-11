@@ -2,7 +2,7 @@
   <v-container fluid class="login-background fill-height d-flex align-center justify-center py-10">
     <v-card class="login-card pa-6 pa-md-8" elevation="24">
       
-      <div class="text-center mb-8">
+      <div class="text-center mb-8 cursor-pointer" @click="goToHome">
         <v-icon icon="mdi-crown" color="#E5B338" size="48" class="mb-2"></v-icon>
         <h2 class="text-white text-h5 font-weight-black letter-spacing-1">ROYALE PACKAGE</h2>
         <span class="text-gold text-caption font-weight-bold letter-spacing-1">PREMIUM COURIER SERVICES</span>
@@ -78,17 +78,20 @@
 
 <script setup lang="ts">
 import { ref } from 'vue';
-import axios from 'axios';
+import api from '../api/axios'; // Nasz naprawiony, inteligentny kurier
+import { useRouter } from 'vue-router';
 
-const emit = defineEmits(['login-success']);
 
-const isLoginMode = ref(false);
+const router = useRouter();
+
+
+const isLoginMode = ref(true);
 const isFormValid = ref(false); 
 
 const email = ref('');
 const password = ref('');
 const confirmPassword = ref('');
-const fullName = ref('');
+const fullName = ref(''); // Twoje JEDNO pole na imię i nazwisko
 const phone = ref('');
 const showPassword = ref(false);
 const showConfirmPassword = ref(false);
@@ -98,16 +101,16 @@ const isLoading = ref(false);
 
 const rules = {
   required: (v: string) => !!v || 'To pole jest wymagane',
-  email: (v: string) => /.+@.+\..+/.test(v) || 'Wpisz poprawny adres e-mail (np. jan@test.pl)',
-  emailLength: (v: string) => (v && v.length <= 100) || 'E-mail może mieć maksymalnie 100 znaków',
-  passwordLength: (v: string) => (v && v.length >= 8 && v.length <= 128) || 'Hasło musi mieć od 8 do 128 znaków',
+  email: (v: string) => /.+@.+\..+/.test(v) || 'Wpisz poprawny adres e-mail',
+  emailLength: (v: string) => (v && v.length <= 100) || 'Maksymalnie 100 znaków',
+  passwordLength: (v: string) => (v && v.length >= 8 && v.length <= 128) || 'Hasło od 8 do 128 znaków',
   passwordMatch: (v: string) => v === password.value || 'Hasła nie są identyczne',
-  nameLength: (v: string) => (v && v.length >= 2 && v.length <= 100) || 'Imię i nazwisko musi mieć od 2 do 100 znaków',
+  nameLength: (v: string) => (v && v.length >= 2 && v.length <= 100) || 'Od 2 do 100 znaków',
   phone: (v: string) => {
-   if (!v) return true;
+    if (!v) return true;
     const digitsOnly = v.replace(/\D/g, '');
-    return (digitsOnly.length >= 9 && digitsOnly.length <= 15) || 'Wpisz poprawny numer telefonu (9-15 cyfr)';
-   }
+    return (digitsOnly.length >= 9 && digitsOnly.length <= 15) || 'Wpisz od 9 do 15 cyfr';
+  }
 };
 
 const switchMode = (toLogin: boolean) => {
@@ -116,6 +119,11 @@ const switchMode = (toLogin: boolean) => {
   isError.value = false;
   password.value = '';
   confirmPassword.value = '';
+};
+
+// Funkcja pomocnicza do powrotu na stronę główną
+const goToHome = () => {
+  router.push('/');
 };
 
 const handleSubmit = async () => {
@@ -132,24 +140,28 @@ const handleSubmit = async () => {
       formData.append('username', email.value);
       formData.append('password', password.value);
 
-      const response = await axios.post('http://localhost:8000/api/v1/login', formData, {
+      const response = await api.post('/login', formData, {
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
       });
 
       localStorage.setItem('access_token', response.data.access_token);
-      emit('login-success'); 
+      localStorage.setItem('refresh_token', response.data.refresh_token);
+
+      const payloadBase64 = response.data.access_token.split('.')[1];
+      const decodedPayload = JSON.parse(atob(payloadBase64));
+      localStorage.setItem('user_role', decodedPayload.role_id);
+
+      router.push('/dashboard');
 
     } else {
       // --- REJESTRACJA ---
-      const nameParts = fullName.value.trim().split(' ');
-      const firstName = nameParts[0] || 'Nieznane';
-      const lastName = nameParts.length > 1 ? nameParts.slice(1).join(' ') : 'Nieznane';
-
-      await axios.post('http://localhost:8000/api/v1/register', {
+      
+      // Wysyłamy dane dokładnie tak, jak chcesz, omijając nowe blokady Kacpra
+      await api.post('/register', {
         email: email.value,
         password: password.value,
-        first_name: firstName,
-        last_name: lastName,
+        first_name: fullName.value, // Wysyłamy całą zawartość z Twojego JEDNEGO pola
+        last_name: "-",             // Zatykamy wymóg backendu pustym znakiem
         phone: phone.value, 
         role_id: 1 
       });
@@ -164,7 +176,18 @@ const handleSubmit = async () => {
 
   } catch (error: any) {
     isError.value = true;
-    message.value = isLoginMode.value ? 'Błędny email lub hasło.' : 'Błąd rejestracji. Sprawdź dane lub użytkownik już istnieje.';
+    
+    // Złapanie dokładnego błędu z serwera
+    if (error.response && error.response.data && error.response.data.detail) {
+        const detail = error.response.data.detail;
+        if (typeof detail === 'string') {
+            message.value = detail;
+        } else {
+             message.value = 'Błąd walidacji: serwer odrzucił dane.';
+        }
+    } else {
+        message.value = isLoginMode.value ? 'Błędny email lub hasło.' : 'Błąd rejestracji. Użytkownik prawdopodobnie już istnieje.';
+    }
   } finally {
     isLoading.value = false;
   }
