@@ -13,6 +13,9 @@ import random
 from database import engine, Base, get_db, SessionLocal
 import models 
 
+# Importujemy bibliotekę do obsługi JWT refresh
+import jwt
+
 #Generowanie tabel w bazie danych na podstawie modeli (jeśli jeszcze nie istnieją)
 models.Base.metadata.create_all(bind=engine) 
 
@@ -243,7 +246,38 @@ def get_me(current_user_email: str = Depends(security.get_current_user_email)):
         "user_email": current_user_email,
         "message": "To jest chroniony endpoint. Jeśli widzisz ten komunikat, token JWT jest poprawny!"
     }
-           
+
+
+
+# Endpoint do odświeżania tokena JWT
+@app.post("/api/v1/refresh", summary="Odśwież Access Token za pomocą Refresh Tokena")
+def refresh_token(request: schemas.RefreshTokenRequest, db: Session = Depends(get_db)):
+    """
+    Endpoint przyjmuje Refresh Token i jeśli jest ważny, wydaje nowy Access Token
+    """
+    # 1. Weryfikujemy Refresh Token
+    try:
+        # Sprawdzamy poprawność tokena i wyciągamy z niego dane
+        payload = jwt.decode(request.refresh_token, security.SECRET_KEY, algorithms=[security.ALGORITHM])
+        # Sprawdzamy czy ktoś nie próbuje oszukać nas z nieprawidłowym tokenem
+        if payload.get("type") != "refresh":
+            raise HTTPException(status_code=401, detail="Nieprawidłowy token")
+        
+        email = payload.get("sub")
+        # Suzkamy użytkownika w bazie danych i weryfikujemy, czy token się zgadza z tym, co mamy zapisane
+        user = db.query(models.User).filter(models.User.email == email).first()
+        if not user or user.refresh_token != request.refresh_token:
+            raise HTTPException(status_code=401, detail="Token unieważniony lub użytkownik nie istnieje")
+        # Jeśli wszystko się zgadza, generujemy nowy Access Token
+        new_access_token = security.create_access_token(data={"sub": user.email, "role_id": user.role_id})
+        return {"access_token": new_access_token, "token_type": "bearer"}
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Token wygasł")
+    except jwt.PyJWTError:
+        raise HTTPException(status_code=401, detail="Nieważny token")
+
+
+
 
 # NADAWANIE PACZEK!!!!!!!!
 
@@ -322,3 +356,16 @@ def create_parcel(
         db.commit()
 
     return new_parcel
+
+# POBIERANIE HISTORII PACZKI (dla klienta i kuriera)
+@app.get("/api/v1/parcels", response_model=list[schemas.ParcelResponse])
+def get_user_parcels(
+    db: Session = Depends(get_db),
+    current_user_email: str = Depends(security.get_current_user_email)
+):
+    current_user = db.query(models.User).filter(models.User.email == current_user_email).first()
+    if not current_user:
+        raise HTTPException(status_code=404, detail="Nie znaleziono użytkownika")
+    # Pobieramy wszystkie paczki, gdzie zalogowany użytkownik jest nadawcą
+    parcels = db.query(models.Parcel).filter(models.Parcel.sender_id == current_user.user_id).all()
+    return parcels
