@@ -1,5 +1,6 @@
 import { createApp } from 'vue'
 import App from './App.vue'
+import router from './router'
 
 // --- KONFIGURACJA VUETIFY ---
 import 'vuetify/styles' // Importujemy główne style CSS od Vuetify
@@ -20,4 +21,4 @@ const vuetify = createVuetify({
 })
 
 // Tworzymy aplikację, wstrzykujemy Vuetify i montujemy na ekranie
-createApp(App).use(vuetify).mount('#app')
+createApp(App).use(router).use(vuetify).mount('#app')

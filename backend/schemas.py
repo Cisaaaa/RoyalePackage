@@ -77,3 +77,7 @@ class ParcelResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+# Schemat do odświeżania tokena
+class RefreshTokenRequest(BaseModel):
+    refresh_token: str
