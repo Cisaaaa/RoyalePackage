@@ -63,9 +63,18 @@ class ParcelCreate(BaseModel):
     @field_validator('sender_phone', 'recipient_phone')
     @classmethod
     def clean_phone(cls, v: str) -> str:
+        # Usuwamy wszystkie znaki z wyjątkiem cyfr
         cleaned = re.sub(r'\D', '', v)
-        if len(cleaned) < 9 or len(cleaned) > 15:
-            raise ValueError('Numer telefonu musi mieć od 9 do 15 cyfr')
+        
+        # --- ZMIANA: Usunięcie polskiego kierunkowego (48) ---
+        if cleaned.startswith('48') and len(cleaned) == 11:
+            cleaned = cleaned[2:] # Obcinamy pierwsze dwie cyfry
+        elif cleaned.startswith('0048') and len(cleaned) == 13:
+            cleaned = cleaned[4:] # Obcinamy pierwsze cztery cyfry
+
+        if len(cleaned) != 9:
+            raise ValueError('Numer telefonu (po odrzuceniu numeru kierunkowego) musi mieć dokładnie 9 cyfr')
+        
         return cleaned
     
 # 3. Model wyjściowy

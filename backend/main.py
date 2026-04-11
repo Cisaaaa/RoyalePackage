@@ -344,16 +344,38 @@ def create_parcel(
     db.commit()
     db.refresh(new_parcel)
 
-    # 7. Symulacja płatności
+    # 7. Symulacja płatności i Pobranie (COD)
     if parcel_data.simulate_payment:
+        # KLIENT ZAZNACZYŁ CHECKBOX: Płaci z góry
         payment = models.Payment(
             parcel_id=new_parcel.parcel_id,
             payer_id=user.user_id,
             amount=tariff.base_price,
-            status="PENDING" # czeka na opłacenie
+            status="PAID" # Ustawiamy na zapłacone
         )
         db.add(payment)
-        db.commit()
+        
+        # Upewniamy się, że paczka NIE jest za pobraniem
+        new_parcel.is_cod = False 
+        new_parcel.cod_amount = None
+
+    else:
+        # KLIENT ODCZNACZYŁ CHECKBOX: Płaci przy odbiorze (Pobranie / COD)
+        payment = models.Payment(
+            parcel_id=new_parcel.parcel_id,
+            payer_id=user.user_id,
+            amount=tariff.base_price,
+            status="PENDING" # Kurier musi odebrać gotówkę
+        )
+        db.add(payment)
+        
+        # Ustawiamy paczkę jako "za pobraniem" i przypisujemy kwotę do pobrania
+        new_parcel.is_cod = True
+        new_parcel.cod_amount = tariff.base_price # Kurier musi odebrać tyle, ile wynosi cena paczki
+
+    # Finalny zapis
+    db.commit()
+    db.refresh(new_parcel)
 
     return new_parcel
 
