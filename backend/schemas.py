@@ -1,30 +1,55 @@
 import re
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
-# 1. Schemat wejściowy (czego oczekujemy przy rejestracji)
+# --- FUNKCJA POMOCNICZA DLA TELEFONÓW ---
+def normalize_polish_phone(v: str | None) -> str | None:
+    if not v:
+        return v
+    
+    # Usuwamy wszystkie znaki z wyjątkiem cyfr
+    cleaned = re.sub(r'\D', '', v)
+    
+    # Usunięcie polskiego kierunkowego (gdyby frontend jednak go przysłał)
+    if cleaned.startswith('48') and len(cleaned) == 11:
+        cleaned = cleaned[2:]
+    elif cleaned.startswith('0048') and len(cleaned) == 13:
+        cleaned = cleaned[4:]
+
+    if len(cleaned) != 9:
+        raise ValueError('Numer telefonu musi mieć dokładnie 9 cyfr')
+    
+    return cleaned
+
+
+# --- 1. SCHEMATY UŻYTKOWNIKA ---
 class UserCreate(BaseModel):
     email: str = Field(..., max_length=100, description="Adres email użytkownika")
     password: str = Field(..., min_length=8, max_length=128, description="Hasło użytkownika")
     first_name: str = Field(..., max_length=50, description="Imię użytkownika")
     last_name: str = Field(..., max_length=50, description="Nazwisko użytkownika")
-    role_id: int = Field(..., description="ID roli użytkownika") # 1 = Klient, 2 = Kurier, 3 = Dyspozytor
+    role_id: int = Field(..., description="ID roli użytkownika")
     phone: str | None = Field(None, max_length=20, description="Numer telefonu użytkownika")
 
     @field_validator('phone')
     @classmethod
-    def validate_and_normalize_phone(cls, v: str | None) -> str | None:
-        if not v:
-            return v
-        
-        # Wyrazenie regularne do usunięcia wszystkich znaków oprócz cyfr
-        cleaned_phone = re.sub(r'\D', '', v)
+    def validate_phone(cls, v: str | None) -> str | None:
+        return normalize_polish_phone(v)
 
-        if len(cleaned_phone) < 9 or len(cleaned_phone) > 15:
-            raise ValueError('Numer telefonu musi mieć od 9 do 15 cyfr')
-        
-        return cleaned_phone
+    # Automatyczne rozdzielanie imienia i nazwiska w razie potrzeby
+    @model_validator(mode='before')
+    @classmethod
+    def split_names(cls, data: dict) -> dict:
+        if isinstance(data, dict):
+            first = data.get('first_name', '').strip()
+            last = data.get('last_name', '').strip()
 
-# 2. Schemat wyjściowy (co zwracamy po rejestracji)
+            if (not last or last == '-') and ' ' in first:
+                parts = first.split(maxsplit=1)
+                data['first_name'] = parts[0]
+                if len(parts) > 1:
+                    data['last_name'] = parts[1]
+        return data
+
 class UserResponse(BaseModel):
     user_id: int
     email: str
@@ -32,52 +57,47 @@ class UserResponse(BaseModel):
     last_name: str
     role_id: int
 
-    # Konfiguracja Pydantic do pracy z SQLAlchemy
     class Config:
         from_attributes = True
 
-# Schemat dla paczek
-# 1. Model Adresu (dla nadawcy i odbiorcy)
+
+# --- 2. SCHEMATY ADRESÓW (z GPS z Google) ---
 class AddressBase(BaseModel):
     street: str = Field(..., max_length=255, description="Nazwa ulicy")
-    building_number: str = Field(..., max_length=20, description="Numer budynku i/lub lokalu") 
+    building_number: str = Field(..., max_length=20, description="Numer budynku/lokalu") 
     city: str = Field(..., max_length=100, description="Miasto")
-    postal_code: str = Field(..., max_length=20, description="Kod pocztowy (np. 00-000)")
-
-# 2. Główny Payload
-class ParcelCreate(BaseModel):
-    sender_name: str = Field(..., max_length=200, description="Imię i nazwisko nadawcy")
-    sender_phone: str = Field(..., max_length=20, description="Telefon nadawcy")
-    sender_address: AddressBase # Zagnieżdżony model!
-
-    recipient_name: str = Field(..., max_length=200, description="Imię i nazwisko odbiorcy")
-    recipient_phone: str = Field(..., max_length=20, description="Telefon odbiorcy")
-    recipient_address: AddressBase # Zagnieżdżony model!
-
-    tariff_id: int = Field(..., description="ID wybranego gabarytu (1=A, 2=B, 3=C)")
+    postal_code: str = Field(..., max_length=20, description="Kod pocztowy")
     
-    # Symulacja płatności PENDING/PAID
-    simulate_payment: bool = Field(False, description="Zaznacz, jeśli klient opłaca z góry")
+    # NOWE POLA NA WSPÓŁRZĘDNE:
+    lat: float | None = Field(None, description="Szerokość geograficzna (z Google Places)")
+    lon: float | None = Field(None, description="Długość geograficzna (z Google Places)")
 
-    #walidator dla numerów telefonów
+
+# --- 3. SCHEMATY PACZEK ---
+class ParcelCreate(BaseModel):
+    # ROZDZIELONE DANE NADAWCY
+    sender_first_name: str = Field(..., max_length=100, description="Imię nadawcy")
+    sender_last_name: str = Field(..., max_length=100, description="Nazwisko nadawcy")
+    sender_phone: str = Field(..., max_length=20, description="Telefon nadawcy")
+    sender_address: AddressBase 
+
+    # ROZDZIELONE DANE ODBIORCY
+    recipient_first_name: str = Field(..., max_length=100, description="Imię odbiorcy")
+    recipient_last_name: str = Field(..., max_length=100, description="Nazwisko odbiorcy")
+    recipient_phone: str = Field(..., max_length=20, description="Telefon odbiorcy")
+    recipient_address: AddressBase 
+
+    tariff_id: int = Field(..., description="ID wybranego gabarytu")
+    simulate_payment: bool = Field(False, description="Czy klient opłaca z góry")
+
     @field_validator('sender_phone', 'recipient_phone')
     @classmethod
-    def clean_phone(cls, v: str) -> str:
-        # Usuwamy wszystkie znaki z wyjątkiem cyfr
-        cleaned = re.sub(r'\D', '', v)
-        
-        # --- ZMIANA: Usunięcie polskiego kierunkowego (48) ---
-        if cleaned.startswith('48') and len(cleaned) == 11:
-            cleaned = cleaned[2:] # Obcinamy pierwsze dwie cyfry
-        elif cleaned.startswith('0048') and len(cleaned) == 13:
-            cleaned = cleaned[4:] # Obcinamy pierwsze cztery cyfry
-
-        if len(cleaned) != 9:
-            raise ValueError('Numer telefonu (po odrzuceniu numeru kierunkowego) musi mieć dokładnie 9 cyfr')
-        
-        return cleaned
+    def clean_parcel_phones(cls, v: str) -> str:
+        result = normalize_polish_phone(v)
+        if result is None:
+            raise ValueError('Numer telefonu jest wymagany')
+        return result
     
-# 3. Model wyjściowy
 class ParcelResponse(BaseModel):
     parcel_id: int
     tracking_number: str
@@ -87,6 +107,7 @@ class ParcelResponse(BaseModel):
     class Config:
         from_attributes = True
 
-# Schemat do odświeżania tokena
+
+# --- 4. INNE ---
 class RefreshTokenRequest(BaseModel):
     refresh_token: str

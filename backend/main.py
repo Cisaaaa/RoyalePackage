@@ -285,96 +285,98 @@ def refresh_token(request: schemas.RefreshTokenRequest, db: Session = Depends(ge
 def create_parcel(
     parcel_data: schemas.ParcelCreate, 
     db: Session = Depends(get_db),
-    current_user_email: str = Depends(security.get_current_user_email) # Ochroniarz: tylko zalogowani!
+    current_user_email: str = Depends(security.get_current_user_email)
 ):
-    """
-    Endpoint do tworzenia nowej przesyłki przez zalogowanego klienta.
-    Zapisuje adresy, wylicza cenę i tworzy główny rekord.
-    """
-    # 1. Identyfikacja klienta
+    # 1. Identyfikacja klienta (płatnika)
     user = db.query(models.User).filter(models.User.email == current_user_email).first()
     if not user:
         raise HTTPException(status_code=404, detail="Nie znaleziono użytkownika")
     
-    # 2. Pobranie cennika (żeby frontend nas nie oszukał wysyłając własną cenę)
+    # 2. Pobranie cennika
     tariff = db.query(models.DimensionalTariff).filter(models.DimensionalTariff.tariff_id == parcel_data.tariff_id).first()
     if not tariff:
         raise HTTPException(status_code=404, detail="Wybrany gabaryt nie istnieje")
     
-    # 3. Tworzymy i zapisujemy adresy
+    # --- PRZYGOTOWANIE WSPÓŁRZĘDNYCH (Magia PostGIS) ---
+    sender_geom = None
+    if parcel_data.sender_address.lon and parcel_data.sender_address.lat:
+        # Format WKT (Well-Known Text). Ważne: najpierw Długość (lon/X), potem Szerokość (lat/Y)
+        sender_geom = f"SRID=4326;POINT({parcel_data.sender_address.lon} {parcel_data.sender_address.lat})"
+        
+    recipient_geom = None
+    if parcel_data.recipient_address.lon and parcel_data.recipient_address.lat:
+        recipient_geom = f"SRID=4326;POINT({parcel_data.recipient_address.lon} {parcel_data.recipient_address.lat})"
+
+    # 3. Tworzymy i zapisujemy adresy (z punktami GPS!)
     sender_address = models.Address(
         street=parcel_data.sender_address.street,
         building_number=parcel_data.sender_address.building_number, 
         city=parcel_data.sender_address.city,
-        postal_code=parcel_data.sender_address.postal_code
+        postal_code=parcel_data.sender_address.postal_code,
+        geom=sender_geom # Wstrzykujemy współrzędne
     )
     recipient_address = models.Address(
         street=parcel_data.recipient_address.street,
         building_number=parcel_data.recipient_address.building_number,
         city=parcel_data.recipient_address.city,
-        postal_code=parcel_data.recipient_address.postal_code
+        postal_code=parcel_data.recipient_address.postal_code,
+        geom=recipient_geom # Wstrzykujemy współrzędne
     )
 
     db.add(sender_address)
     db.add(recipient_address)
-    db.flush() # Wymuszamy wygenerowanie ID dla adresów, zanim stworzymy paczkę
+    db.flush() 
 
-    # 4. generowanie unikalnego numeru przesyłki
+    # 4. Generowanie numeru przesyłki
     while True:
         tracking_num = f"RP{random.randint(1000000, 9999999)}PL"
         existing_parcel = db.query(models.Parcel).filter(models.Parcel.tracking_number == tracking_num).first()
         if not existing_parcel:
-            break # Numer jest wolny, wychodzimy z pętli!
+            break 
 
-    # --- NOWA LOGIKA CENNIKA ---
+    # 5. Logika cennika
     final_price = float(tariff.base_price)
-    COD_FEE = 5.00 # Stała dopłata za pobranie
-
-    # Jeśli klient NIE opłaca z góry (czyli wybiera pobranie), doliczamy 5 zł
+    COD_FEE = 5.00 
     if not parcel_data.simulate_payment:
         final_price += COD_FEE
 
-    # 5. Złożenie paczki w całość
+    # --- PRZYGOTOWANIE DANYCH Z ETYKIETY ---
+    sender_full_name = f"{parcel_data.sender_first_name} {parcel_data.sender_last_name}"
+    recipient_full_name = f"{parcel_data.recipient_first_name} {parcel_data.recipient_last_name}"
+
+    # 6. Złożenie paczki w całość
     new_parcel = models.Parcel(
         tracking_number=tracking_num,
-        sender_id=user.user_id,
+        sender_id=user.user_id, # Ten kto zapłacił
+        
+        # Zapisujemy rzeczywiste dane z formularza
+        sender_custom_name=sender_full_name,
+        sender_phone=parcel_data.sender_phone,
+        recipient_custom_name=recipient_full_name,
+        recipient_phone=parcel_data.recipient_phone,
+        
         sender_address_id=sender_address.address_id,
         recipient_address_id=recipient_address.address_id,
-        recipient_phone=parcel_data.recipient_phone,
         tariff_id=parcel_data.tariff_id,
-        calculated_price=final_price, # Zapisujemy całkowitą cenę!
+        calculated_price=final_price,
         current_warehouse_id=1, 
         status_id=1 
     )
+    
     db.add(new_parcel)
     db.commit()
     db.refresh(new_parcel)
 
-    # 7. Symulacja płatności i Pobranie (COD)
+    # 7. Symulacja płatności
     if parcel_data.simulate_payment:
-        # Płaci z góry (bez dopłaty)
-        payment = models.Payment(
-            parcel_id=new_parcel.parcel_id,
-            payer_id=user.user_id,
-            amount=final_price, 
-            status="PAID" 
-        )
+        payment = models.Payment(parcel_id=new_parcel.parcel_id, payer_id=user.user_id, amount=final_price, status="PAID")
         db.add(payment)
         new_parcel.is_cod = False 
         new_parcel.cod_amount = None
-
     else:
-        # Płaci przy odbiorze (z dopłatą 5 zł)
-        payment = models.Payment(
-            parcel_id=new_parcel.parcel_id,
-            payer_id=user.user_id,
-            amount=final_price, 
-            status="PENDING" 
-        )
+        payment = models.Payment(parcel_id=new_parcel.parcel_id, payer_id=user.user_id, amount=final_price, status="PENDING")
         db.add(payment)
-        
         new_parcel.is_cod = True
-        # Kurier musi pobrać od klienta całkowitą kwotę (cena bazowa + 5 zł dopłaty)
         new_parcel.cod_amount = final_price 
 
     db.commit()
