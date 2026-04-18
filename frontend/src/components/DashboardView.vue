@@ -104,17 +104,11 @@
         <v-row class="mb-4 text-center">
           <v-col>
             <h1 class="text-white">Panel Dyspozytora HUBu</h1>
+            <p class="text-grey-lighten-1">Zarządzaj magazynem i twórz trasy dla kurierów.</p>
           </v-col>
         </v-row>
-        <v-row justify="center">
-          <v-col cols="12" md="8">
-            <v-card class="pa-10 text-center" color="#0B172A" elevation="3">
-              <v-icon size="80" color="#E5B338">mdi-warehouse</v-icon>
-              <h2 class="mt-4 text-white">Zarządzanie Magazynem</h2>
-              <p class="text-grey-lighten-1 mt-2 text-body-1">Oczekujące paczki do przypisania: 0</p>
-            </v-card>
-          </v-col>
-        </v-row>
+        
+        <DispatcherPanel />
       </div>
 
     </v-container>
@@ -127,6 +121,7 @@ import ParcelForm from './ParcelForm.vue';
 import CourierMap from './CourierMap.vue';
 import { useRouter } from 'vue-router';
 import api from '../api/axios'; // KLUCZOWY DODATEK: nasz komunikator z backendem
+import DispatcherPanel from '../components/DispatcherPanel.vue';
 
 const router = useRouter();
 
