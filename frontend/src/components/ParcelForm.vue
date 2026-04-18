@@ -10,29 +10,39 @@
       <h3 class="text-gold mb-4 text-subtitle-1 font-weight-bold text-uppercase letter-spacing-1">Dane Nadawcy</h3>
       <v-row dense>
         <v-col cols="12" md="6">
-          <p class="text-caption text-grey-lighten-1 mb-1 font-weight-bold text-uppercase">Imię i Nazwisko</p>
-          <v-text-field v-model="formData.sender_name" :rules="[rules.required, rules.max200]" placeholder="Jan Kowalski" variant="solo-filled" bg-color="#1E293B" color="#E5B338" base-color="transparent" class="custom-input mb-2"></v-text-field>
+          <p class="text-caption text-grey-lighten-1 mb-1 font-weight-bold text-uppercase">Imię</p>
+          <v-text-field v-model="formData.sender_first_name" :rules="[rules.required]" placeholder="Jan" variant="solo-filled" bg-color="#1E293B" color="#E5B338" base-color="transparent" class="custom-input mb-2"></v-text-field>
         </v-col>
         <v-col cols="12" md="6">
-          <p class="text-caption text-grey-lighten-1 mb-1 font-weight-bold text-uppercase">Telefon</p>
-          <v-text-field v-model="formData.sender_phone" :rules="[rules.required, rules.phone]" placeholder="np. 123456789" variant="solo-filled" bg-color="#1E293B" color="#E5B338" base-color="transparent" class="custom-input mb-2"></v-text-field>
+          <p class="text-caption text-grey-lighten-1 mb-1 font-weight-bold text-uppercase">Nazwisko</p>
+          <v-text-field v-model="formData.sender_last_name" :rules="[rules.required]" placeholder="Kowalski" variant="solo-filled" bg-color="#1E293B" color="#E5B338" base-color="transparent" class="custom-input mb-2"></v-text-field>
+        </v-col>
+
+        <v-col cols="4" md="3">
+          <p class="text-caption text-grey-lighten-1 mb-1 font-weight-bold text-uppercase">Kraj</p>
+          <v-select v-model="senderPhonePrefix" :items="['+48', '+44', '+49']" variant="solo-filled" bg-color="#1E293B" color="#E5B338" class="custom-input mb-2"></v-select>
+        </v-col>
+        <v-col cols="8" md="9">
+          <p class="text-caption text-grey-lighten-1 mb-1 font-weight-bold text-uppercase">Telefon (9 cyfr)</p>
+          <v-text-field v-model="formData.sender_phone" :rules="[rules.required, rules.phoneStrict]" placeholder="123456789" variant="solo-filled" bg-color="#1E293B" color="#E5B338" base-color="transparent" class="custom-input mb-2"></v-text-field>
         </v-col>
         
-        <v-col cols="8" md="6">
-          <p class="text-caption text-grey-lighten-1 mb-1 font-weight-bold text-uppercase">Ulica</p>
-          <v-text-field v-model="formData.sender_address.street" :rules="[rules.required, rules.max255]" placeholder="ul. Sezamkowa" variant="solo-filled" bg-color="#1E293B" color="#E5B338" base-color="transparent" class="custom-input mb-2"></v-text-field>
+        <v-col cols="12">
+          <p class="text-caption text-gold mb-1 font-weight-bold text-uppercase">Wyszukaj Adres Nadawcy (Google)</p>
+          <v-text-field id="sender-autocomplete" placeholder="Zacznij wpisywać adres (np. Fiołkowa 12, Warszawa)..." variant="solo-filled" bg-color="#2D3748" color="#E5B338" prepend-inner-icon="mdi-magnify" class="custom-input mb-2"></v-text-field>
         </v-col>
-        <v-col cols="4" md="2">
-          <p class="text-caption text-grey-lighten-1 mb-1 font-weight-bold text-uppercase">Nr lokalu</p>
-          <v-text-field v-model="formData.sender_address.building_number" :rules="[rules.required, rules.max20]" placeholder="12/3" variant="solo-filled" bg-color="#1E293B" color="#E5B338" base-color="transparent" class="custom-input mb-2"></v-text-field>
+
+        <v-col cols="8" md="5">
+          <v-text-field v-model="formData.sender_address.street" label="Ulica (Z automatu)" readonly variant="outlined" color="#94A3B8"></v-text-field>
         </v-col>
-        <v-col cols="6" md="4">
-          <p class="text-caption text-grey-lighten-1 mb-1 font-weight-bold text-uppercase">Kod Pocztowy</p>
-          <v-text-field v-model="formData.sender_address.postal_code" :rules="[rules.required, rules.max20]" placeholder="00-000" variant="solo-filled" bg-color="#1E293B" color="#E5B338" base-color="transparent" class="custom-input mb-2"></v-text-field>
+        <v-col cols="4" md="3">
+          <v-text-field v-model="formData.sender_address.building_number" :rules="[rules.required]" label="Nr lokalu / dom" placeholder="np. 12/3" variant="outlined" color="#E5B338" hint="Wpisz ręcznie" persistent-hint></v-text-field>
         </v-col>
-        <v-col cols="6" md="12">
-          <p class="text-caption text-grey-lighten-1 mb-1 font-weight-bold text-uppercase">Miasto</p>
-          <v-text-field v-model="formData.sender_address.city" :rules="[rules.required, rules.max100]" placeholder="Warszawa" variant="solo-filled" bg-color="#1E293B" color="#E5B338" base-color="transparent" class="custom-input mb-2"></v-text-field>
+        <v-col cols="4" md="4">
+          <v-text-field v-model="formData.sender_address.postal_code" label="Kod" readonly variant="outlined" color="#94A3B8"></v-text-field>
+        </v-col>
+        <v-col cols="8" md="12">
+          <v-text-field v-model="formData.sender_address.city" label="Miasto (Z automatu)" readonly variant="outlined" color="#94A3B8"></v-text-field>
         </v-col>
       </v-row>
 
@@ -41,29 +51,39 @@
       <h3 class="text-gold mb-4 text-subtitle-1 font-weight-bold text-uppercase letter-spacing-1">Dane Odbiorcy</h3>
       <v-row dense>
         <v-col cols="12" md="6">
-          <p class="text-caption text-grey-lighten-1 mb-1 font-weight-bold text-uppercase">Imię i Nazwisko</p>
-          <v-text-field v-model="formData.recipient_name" :rules="[rules.required, rules.max200]" placeholder="Anna Nowak" variant="solo-filled" bg-color="#1E293B" color="#E5B338" base-color="transparent" class="custom-input mb-2"></v-text-field>
+          <p class="text-caption text-grey-lighten-1 mb-1 font-weight-bold text-uppercase">Imię</p>
+          <v-text-field v-model="formData.recipient_first_name" :rules="[rules.required]" placeholder="Anna" variant="solo-filled" bg-color="#1E293B" color="#E5B338" class="custom-input mb-2"></v-text-field>
         </v-col>
         <v-col cols="12" md="6">
-          <p class="text-caption text-grey-lighten-1 mb-1 font-weight-bold text-uppercase">Telefon</p>
-          <v-text-field v-model="formData.recipient_phone" :rules="[rules.required, rules.phone]" placeholder="np. 987654321" variant="solo-filled" bg-color="#1E293B" color="#E5B338" base-color="transparent" class="custom-input mb-2"></v-text-field>
+          <p class="text-caption text-grey-lighten-1 mb-1 font-weight-bold text-uppercase">Nazwisko</p>
+          <v-text-field v-model="formData.recipient_last_name" :rules="[rules.required]" placeholder="Nowak" variant="solo-filled" bg-color="#1E293B" color="#E5B338" class="custom-input mb-2"></v-text-field>
+        </v-col>
+
+        <v-col cols="4" md="3">
+          <p class="text-caption text-grey-lighten-1 mb-1 font-weight-bold text-uppercase">Kraj</p>
+          <v-select v-model="recipientPhonePrefix" :items="['+48', '+44', '+49']" variant="solo-filled" bg-color="#1E293B" color="#E5B338" class="custom-input mb-2"></v-select>
+        </v-col>
+        <v-col cols="8" md="9">
+          <p class="text-caption text-grey-lighten-1 mb-1 font-weight-bold text-uppercase">Telefon (9 cyfr)</p>
+          <v-text-field v-model="formData.recipient_phone" :rules="[rules.required, rules.phoneStrict]" placeholder="987654321" variant="solo-filled" bg-color="#1E293B" color="#E5B338" class="custom-input mb-2"></v-text-field>
         </v-col>
         
-        <v-col cols="8" md="6">
-          <p class="text-caption text-grey-lighten-1 mb-1 font-weight-bold text-uppercase">Ulica</p>
-          <v-text-field v-model="formData.recipient_address.street" :rules="[rules.required, rules.max255]" placeholder="ul. Klonowa" variant="solo-filled" bg-color="#1E293B" color="#E5B338" base-color="transparent" class="custom-input mb-2"></v-text-field>
+        <v-col cols="12">
+          <p class="text-caption text-gold mb-1 font-weight-bold text-uppercase">Wyszukaj Adres Odbiorcy (Google)</p>
+          <v-text-field id="recipient-autocomplete" placeholder="Zacznij wpisywać adres..." variant="solo-filled" bg-color="#2D3748" color="#E5B338" prepend-inner-icon="mdi-magnify" class="custom-input mb-2"></v-text-field>
         </v-col>
-        <v-col cols="4" md="2">
-          <p class="text-caption text-grey-lighten-1 mb-1 font-weight-bold text-uppercase">Nr lokalu</p>
-          <v-text-field v-model="formData.recipient_address.building_number" :rules="[rules.required, rules.max20]" placeholder="5" variant="solo-filled" bg-color="#1E293B" color="#E5B338" base-color="transparent" class="custom-input mb-2"></v-text-field>
+
+        <v-col cols="8" md="5">
+          <v-text-field v-model="formData.recipient_address.street" label="Ulica" readonly variant="outlined" color="#94A3B8"></v-text-field>
         </v-col>
-        <v-col cols="6" md="4">
-          <p class="text-caption text-grey-lighten-1 mb-1 font-weight-bold text-uppercase">Kod Pocztowy</p>
-          <v-text-field v-model="formData.recipient_address.postal_code" :rules="[rules.required, rules.max20]" placeholder="31-000" variant="solo-filled" bg-color="#1E293B" color="#E5B338" base-color="transparent" class="custom-input mb-2"></v-text-field>
+        <v-col cols="4" md="3">
+          <v-text-field v-model="formData.recipient_address.building_number" :rules="[rules.required]" label="Nr lokalu / dom" variant="outlined" color="#E5B338"></v-text-field>
         </v-col>
-        <v-col cols="6" md="12">
-          <p class="text-caption text-grey-lighten-1 mb-1 font-weight-bold text-uppercase">Miasto</p>
-          <v-text-field v-model="formData.recipient_address.city" :rules="[rules.required, rules.max100]" placeholder="Kraków" variant="solo-filled" bg-color="#1E293B" color="#E5B338" base-color="transparent" class="custom-input mb-2"></v-text-field>
+        <v-col cols="4" md="4">
+          <v-text-field v-model="formData.recipient_address.postal_code" label="Kod" readonly variant="outlined" color="#94A3B8"></v-text-field>
+        </v-col>
+        <v-col cols="8" md="12">
+          <v-text-field v-model="formData.recipient_address.city" label="Miasto" readonly variant="outlined" color="#94A3B8"></v-text-field>
         </v-col>
       </v-row>
 
@@ -85,19 +105,15 @@
 
       <v-card variant="outlined" color="#E5B338" class="mb-8 rounded-lg pa-4 bg-transparent border-opacity-25">
         <h4 class="text-white text-uppercase font-weight-bold mb-4 text-subtitle-2">Podsumowanie Kosztów</h4>
-        
         <div class="d-flex justify-space-between mb-2">
-          <span class="text-grey-lighten-1">Cena bazowa (Kategoria {{ formData.tariff_id === 1 ? 'A' : formData.tariff_id === 2 ? 'B' : 'C' }}):</span>
+          <span class="text-grey-lighten-1">Cena bazowa:</span>
           <span class="text-white font-weight-bold">{{ basePrice.toFixed(2) }} zł</span>
         </div>
-        
         <div class="d-flex justify-space-between mb-2" v-if="!formData.simulate_payment">
           <span class="text-grey-lighten-1">Opłata dodatkowa (Za pobraniem):</span>
           <span class="text-white font-weight-bold">+ {{ codFee.toFixed(2) }} zł</span>
         </div>
-
         <v-divider class="my-3 border-opacity-25" color="#E5B338"></v-divider>
-        
         <div class="d-flex justify-space-between align-center mt-2">
           <span class="text-gold font-weight-bold text-h6">Do zapłaty:</span>
           <span class="text-gold font-weight-black text-h5">{{ totalPrice.toFixed(2) }} zł</span>
@@ -125,25 +141,33 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'; // Dodany import 'computed'
+import { ref, computed, onMounted } from 'vue';
 import api from '../api/axios';
 
 const isFormValid = ref(false);
 const isLoading = ref(false);
 const serverMessage = ref('');
 
+// Dodatkowe zmienne dla selectów z prefiksami
+const senderPhonePrefix = ref('+48');
+const recipientPhonePrefix = ref('+48');
+
+// Zaktualizowany formData (osobne imiona, dodane lat/lon)
 const formData = ref({
-  sender_name: '',
+  sender_first_name: '',
+  sender_last_name: '',
   sender_phone: '',
-  sender_address: { street: '', building_number: '', city: '', postal_code: '' },
-  recipient_name: '',
+  sender_address: { street: '', building_number: '', city: '', postal_code: '', lat: null as number | null, lon: null as number | null },
+  
+  recipient_first_name: '',
+  recipient_last_name: '',
   recipient_phone: '',
-  recipient_address: { street: '', building_number: '', city: '', postal_code: '' },
+  recipient_address: { street: '', building_number: '', city: '', postal_code: '', lat: null as number | null, lon: null as number | null },
+  
   tariff_id: 1, 
   simulate_payment: false
 });
 
-// --- LOGIKA OBLICZANIA KOSZTÓW (REAKTYWNA) ---
 const basePrice = computed(() => {
   if (formData.value.tariff_id === 1) return 15.99;
   if (formData.value.tariff_id === 2) return 20.99;
@@ -151,45 +175,84 @@ const basePrice = computed(() => {
   return 15.99;
 });
 
-const codFee = computed(() => {
-  // Jeśli klient opłaci z góry (checkbox true), dopłata wynosi 0 zł. W przeciwnym razie 5 zł.
-  return formData.value.simulate_payment ? 0 : 5.00;
-});
-
-const totalPrice = computed(() => {
-  return basePrice.value + codFee.value;
-});
-// ----------------------------------------------
+const codFee = computed(() => { return formData.value.simulate_payment ? 0 : 5.00; });
+const totalPrice = computed(() => { return basePrice.value + codFee.value; });
 
 const rules = {
-  required: (v: string) => !!v || 'To pole jest wymagane, nie możesz go pominąć',
-  phone: (v: string) => {
+  required: (v: string) => !!v || 'Wymagane',
+  // Prostsza walidacja telefonu, bo usunęliśmy prefiks do selecta
+  phoneStrict: (v: string) => {
     if (!v) return true;
     const digitsOnly = v.replace(/\D/g, '');
-    return (digitsOnly.length >= 9 && digitsOnly.length <= 15) || 'Wpisz poprawny numer telefonu (od 9 do 15 cyfr)';
-  },
-  max200: (v: string) => (v && v.length <= 200) || 'Przekroczono limit znaków (max 200)',
-  max255: (v: string) => (v && v.length <= 255) || 'Przekroczono limit znaków (max 255)',
-  max100: (v: string) => (v && v.length <= 100) || 'Przekroczono limit znaków (max 100)',
-  max20: (v: string) => (v && v.length <= 20) || 'Przekroczono limit znaków (max 20)'
+    return digitsOnly.length === 9 || 'Wpisz dokładnie 9 cyfr';
+  }
 };
+
+// --- MAGIA GOOGLE PLACES API ---
+onMounted(() => {
+  // Funkcja pomocnicza do "rozpakowywania" danych od Google
+  const extractAddressData = (place: any, targetObject: any) => {
+    targetObject.street = '';
+    targetObject.city = '';
+    targetObject.postal_code = '';
+    targetObject.lat = place.geometry?.location?.lat() || null;
+    targetObject.lon = place.geometry?.location?.lng() || null;
+
+    for (const component of place.address_components) {
+      const type = component.types[0];
+      if (type === 'route') targetObject.street = component.long_name;
+      if (type === 'street_number') {
+        // Jeśli Google ma numer w bazie, doklejamy do ulicy lub wpisujemy w nr budynku
+        targetObject.building_number = component.long_name;
+      }
+      if (type === 'locality') targetObject.city = component.long_name;
+      if (type === 'postal_code') targetObject.postal_code = component.long_name;
+    }
+  };
+
+  // Uruchomienie Google Autocomplete dla Nadawcy
+  const senderInput = document.getElementById('sender-autocomplete') as HTMLInputElement;
+  if (senderInput && window.google) {
+    const senderAutocomplete = new google.maps.places.Autocomplete(senderInput, {
+      types: ['address'], componentRestrictions: { country: 'pl' }
+    });
+    senderAutocomplete.addListener('place_changed', () => {
+      extractAddressData(senderAutocomplete.getPlace(), formData.value.sender_address);
+    });
+  }
+
+  // Uruchomienie Google Autocomplete dla Odbiorcy
+  const recipientInput = document.getElementById('recipient-autocomplete') as HTMLInputElement;
+  if (recipientInput && window.google) {
+    const recipientAutocomplete = new google.maps.places.Autocomplete(recipientInput, {
+      types: ['address'], componentRestrictions: { country: 'pl' }
+    });
+    recipientAutocomplete.addListener('place_changed', () => {
+      extractAddressData(recipientAutocomplete.getPlace(), formData.value.recipient_address);
+    });
+  }
+});
 
 const submitParcel = async () => {
   if (!isFormValid.value) return;
-  
   isLoading.value = true;
   serverMessage.value = '';
 
+  // Przed wysłaniem do backendu, łączymy imiona, żeby backendowy `sender_name` (jeśli w backendzie jeszcze nie zmieniłeś na first i last name) zadziałał
+  // UWAGA: Jeśli w schemas.py już rozdzieliłeś to na `sender_first_name` i `sender_last_name`, wyślij obiekt tak jak jest!
+  
   try {
-    const response = await api.post('/parcels', formData.value);
-    
-    serverMessage.value = `Sukces! Nadano paczkę. Twój numer śledzenia: ${response.data.tracking_number}`;
+    // Wysyłamy dane (bez prefixu, bo zakładamy polskie numery na potrzeby MVP)
+    const payload = {
+      ...formData.value,
+      sender_phone: formData.value.sender_phone, // backend zweryfikuje 9 cyfr
+      recipient_phone: formData.value.recipient_phone,
+    };
+
+    const response = await api.post('/parcels', payload);
+    serverMessage.value = `Sukces! Nadano paczkę. Numer: ${response.data.tracking_number}`;
   } catch (error: any) {
-    if (error.response && error.response.status === 422) {
-      serverMessage.value = 'Błąd Walidacji Serwera: Upewnij się, że wszystkie pola są poprawne.';
-    } else {
-      serverMessage.value = 'Wystąpił problem z połączeniem lub sesja wygasła. Spróbuj ponownie.';
-    }
+    serverMessage.value = 'Błąd Walidacji Serwera: Upewnij się, że wszystkie pola są poprawne i wpisałeś 9 cyfr telefonu.';
   } finally {
     isLoading.value = false;
   }
@@ -202,7 +265,6 @@ const submitParcel = async () => {
   border: 1px solid rgba(229, 179, 56, 0.1);
   border-radius: 20px;
 }
-
 .text-gold { color: #E5B338 !important; }
 .letter-spacing-1 { letter-spacing: 1px; }
 
@@ -210,12 +272,15 @@ const submitParcel = async () => {
   border-radius: 12px;
   box-shadow: inset 0 2px 4px rgba(0,0,0,0.3) !important;
 }
+.custom-input :deep(.v-field__input) { color: white !important; }
+.custom-input :deep(.v-label) { color: #94A3B8 !important; }
 
-.custom-input :deep(.v-field__input) {
+/* Opcjonalne: Stylizacja inputa Google Places, żeby pasował do reszty */
+.pac-container {
+  background-color: #1E293B !important;
   color: white !important;
+  border: 1px solid #E5B338 !important;
 }
-
-.custom-input :deep(.v-label) {
-  color: #94A3B8 !important;
-}
+.pac-item { color: #94A3B8 !important; }
+.pac-item-query { color: white !important; }
 </style>

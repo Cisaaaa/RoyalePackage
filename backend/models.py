@@ -95,20 +95,25 @@ class Parcel(Base):
     
     parcel_id = Column(Integer, primary_key=True, index=True)
     tracking_number = Column(String(50), unique=True, index=True, nullable=False)
-    
-    # --- NOWE POLE: Aktualny status paczki ---
     status_id = Column(Integer, ForeignKey("statuses.status_id"), nullable=False, default=1)
 
-    # Klucze obce - trzymają paczkę w ryzach
     sender_id = Column(Integer, ForeignKey("users.user_id"), nullable=False)
     sender_address_id = Column(Integer, ForeignKey("addresses.address_id"), nullable=False)
     recipient_address_id = Column(Integer, ForeignKey("addresses.address_id"), nullable=False)
     tariff_id = Column(Integer, ForeignKey("dimensional_tariffs.tariff_id"), nullable=False)
     current_warehouse_id = Column(Integer, ForeignKey("warehouses.warehouse_id"), nullable=True)
     
+    # --- NOWE/ZMODYFIKOWANE POLA ---
+    # Zapisujemy rzeczywiste dane z etykiety, niezależnie od tego kto jest zalogowany
+    sender_custom_name = Column(String(200), nullable=False)
+    sender_phone = Column(String(20), nullable=False)
+    
+    recipient_custom_name = Column(String(200), nullable=False)
     recipient_phone = Column(String(20), nullable=False)
+    # -------------------------------
+
     calculated_price = Column(Float, nullable=False)
-    is_cod = Column(Boolean, default=False) # Cash on Delivery (Pobranie)
+    is_cod = Column(Boolean, default=False)
     cod_amount = Column(Float, nullable=True)
 
 
