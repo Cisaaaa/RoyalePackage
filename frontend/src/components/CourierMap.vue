@@ -8,7 +8,7 @@
     <div id="courier-map" style="height: 500px; width: 100%; border-radius: 12px; z-index: 1;"></div>
   </v-card>
 
-  <v-card class="custom-card pa-4 pa-md-6" elevation="10">
+  <v-card v-if="routeStops.length > 0" class="custom-card pa-4 pa-md-6" elevation="10">
     <h3 class="text-gold mb-4 text-h5 font-weight-bold">Lista Przesyłek (Zoptymalizowana)</h3>
     
     <v-list bg-color="transparent" class="pa-0">
@@ -65,7 +65,17 @@
       </v-list-item>
     </v-list>
   </v-card>
+
+  <v-card v-else class="custom-card pa-10 text-center" elevation="10">
+    <v-icon size="80" color="#94A3B8" class="mb-4">mdi-coffee-outline</v-icon>
+    <h2 class="text-h4 font-weight-bold text-white mb-2">Brak aktualnych tras</h2>
+    <p class="text-grey-lighten-1 text-body-1">
+      Wszystkie paczki zostały doręczone lub dyspozytor nie przypisał Ci jeszcze żadnego zlecenia.
+      Odpocznij, a system powiadomi Cię, gdy pojawi się nowa trasa!
+    </p>
+  </v-card>
 </template>
+
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue';
@@ -201,9 +211,35 @@ const renderRouteAndMarkers = async () => {
   }
 };
 
-const markAsDelivered = (index: number) => {
-  routeStops.value[index].status = 'COMPLETED';
-  renderRouteAndMarkers(); 
+const markAsDelivered = async (index: number) => {
+  const stop = routeStops.value[index];
+  
+  try {
+    // 1. Zabezpieczenie dla pierwszego przystanku (Start z magazynu - nie ma ID paczki)
+    if (stop.operation_type === 'WAREHOUSE_TRANSFER') {
+      routeStops.value[index].status = 'COMPLETED';
+      renderRouteAndMarkers();
+      return;
+    }
+
+    // 2. Strzał do Twojego backendu! (Tego brakowało u Kacpra)
+    await api.put(`/courier/parcels/${stop.parcel_id}/deliver`);
+
+    // 3. Po udanym zapisie w bazie, aktualizujemy wygląd na ekranie kuriera
+    routeStops.value[index].status = 'COMPLETED';
+    renderRouteAndMarkers(); 
+
+    // 4. Magia czyszczenia ekranu: Sprawdzamy, czy wszystkie paczki mają już status 'COMPLETED'
+    const allCompleted = routeStops.value.every(s => s.status === 'COMPLETED');
+    if (allCompleted) {
+      // Jeśli tak, czyścimy tablicę tras. Vue automatycznie schowa mapę i pokaże nowy komunikat.
+      routeStops.value = [];
+    }
+
+  } catch (error) {
+    console.error("Błąd zapisu w bazie danych:", error);
+    alert("Wystąpił błąd podczas komunikacji z serwerem. Upewnij się, że masz połączenie z internetem.");
+  }
 };
 
 // --- LONG POLLING ---
