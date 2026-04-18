@@ -76,37 +76,49 @@ import api from '../api/axios';
 const routeStops = ref<any[]>([]);
 let map: L.Map | null = null; 
 let layerGroup: L.LayerGroup | null = null; 
+let currentStopCount = 0; // Pamiętamy ilość paczek do Long Pollingu
 
 onMounted(async () => {
   try {
     const response = await api.get('/courier/route');
     let fetchedStops = response.data.map((stop: any) => ({ ...stop, status: 'PLANNED' }));
+    currentStopCount = fetchedStops.length;
 
-    // MAGIA 1: Optymalizujemy kolejność listy za pomocą OSRM (tylko raz na start)
-    if (fetchedStops.length >= 2) {
-      const coords = fetchedStops.map((s: any) => `${s.lon},${s.lat}`).join(';');
-      // destination=any pozwala OSRM wybrać logiczny koniec trasy i zoptymalizować środek
-      const tripUrl = `https://router.project-osrm.org/trip/v1/driving/${coords}?source=first&destination=any&roundtrip=false`;
-      
-      const tripResp = await fetch(tripUrl);
-      const tripData = await tripResp.json();
-
-      if (tripData.code === "Ok" && tripData.waypoints) {
-        const optimized = new Array(fetchedStops.length);
-        // OSRM zwraca nam indeksy, jak mamy ułożyć paczki
-        tripData.waypoints.forEach((wp: any, index: number) => {
-          optimized[wp.waypoint_index] = fetchedStops[index];
-        });
-        fetchedStops = optimized;
-      }
-    }
+    fetchedStops = await optimizeRoute(fetchedStops);
 
     routeStops.value = fetchedStops;
     initMap();
+    
+    // Startujemy nasłuchiwanie na nowe paczki
+    startLongPolling();
+
   } catch (error) {
     console.error("Błąd pobierania/optymalizacji trasy:", error);
   }
 });
+
+// Funkcja pomocnicza: Wyciągnięta logika OSRM, żeby użyć jej też przy Long Pollingu
+const optimizeRoute = async (stops: any[]) => {
+  if (stops.length < 2) return stops;
+  try {
+    const coords = stops.map((s: any) => `${s.lon},${s.lat}`).join(';');
+    const tripUrl = `https://router.project-osrm.org/trip/v1/driving/${coords}?source=first&destination=any&roundtrip=false`;
+    
+    const tripResp = await fetch(tripUrl);
+    const tripData = await tripResp.json();
+
+    if (tripData.code === "Ok" && tripData.waypoints) {
+      const optimized = new Array(stops.length);
+      tripData.waypoints.forEach((wp: any, index: number) => {
+        optimized[wp.waypoint_index] = stops[index];
+      });
+      return optimized;
+    }
+  } catch(e) {
+    console.error("Błąd optymalizacji OSRM", e);
+  }
+  return stops;
+};
 
 const initMap = () => {
   let centerLat = 52.237; let centerLon = 21.011;
@@ -129,7 +141,7 @@ const renderRouteAndMarkers = async () => {
   const completedIcon = L.icon({ iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-grey.png', shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png', iconSize: [25, 41], iconAnchor: [12, 41], popupAnchor: [1, -34] });
   const hubIcon = L.icon({ iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-gold.png', shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png', iconSize: [25, 41], iconAnchor: [12, 41], popupAnchor: [1, -34] });
 
-  // 1. Rysowanie pinezek (bez zmian)
+  // 1. Rysowanie pinezek
   routeStops.value.forEach((stop, index) => {
     if (stop.lat && stop.lon) {
       let currentIcon = stop.status === 'COMPLETED' ? completedIcon : activeIcon;
@@ -140,31 +152,25 @@ const renderRouteAndMarkers = async () => {
     }
   });
 
-  // --- NAPRAWA LOGIKI TRASOWANIA ---
-  
-  // Szukamy indeksu pierwszej paczki/przystanku, który NIE JEST jeszcze ukończony
+  // --- LOGIKA TRASOWANIA (Początek od ostatniego punktu) ---
   const firstPendingIndex = routeStops.value.findIndex(s => s.status !== 'COMPLETED');
-
   let routingStops = [];
 
   if (firstPendingIndex === -1) {
-    // Wszystko doręczone - brak trasy do narysowania
-    routingStops = [];
+    routingStops = []; // Wszystko doręczone
   } else if (firstPendingIndex === 0) {
-    // Jeszcze nie wyruszyliśmy z HUBu
-    routingStops = routeStops.value;
+    routingStops = routeStops.value; // Jeszcze nie wyruszyliśmy
   } else {
-    // Wyruszyliśmy! Bierzemy OSTATNI zaliczony punkt (jako fizyczną lokalizację kuriera) i wszystkie pozostałe
+    // Wyruszyliśmy - bierzemy ostatni punkt jako pozycję i wyznaczamy trasę do reszty
     routingStops = routeStops.value.slice(firstPendingIndex - 1);
   }
 
-  // Zabezpieczenie przed brakami GPS
   routingStops = routingStops.filter(s => s.lat !== null && s.lon !== null);
 
   // 2. Rysowanie linii OSRM
   if (routingStops.length >= 2) {
     try {
-      // Linia aktualnego celu (od aktualnego miejsca do najbliższej paczki)
+      // Aktualny cel (Niebieski)
       const currentLegUrl = `https://router.project-osrm.org/route/v1/driving/${routingStops[0].lon},${routingStops[0].lat};${routingStops[1].lon},${routingStops[1].lat}?overview=full&geometries=geojson`;
       const currentResp = await fetch(currentLegUrl);
       const currentData = await currentResp.json();
@@ -175,7 +181,7 @@ const renderRouteAndMarkers = async () => {
         }).addTo(layerGroup!);
       }
 
-      // Reszta trasy (od najbliższej paczki do końca)
+      // Przyszłe cele (Szary przerywany)
       if (routingStops.length > 2) {
         const futureCoords = routingStops.slice(1).map(s => `${s.lon},${s.lat}`).join(';');
         const futureUrl = `https://router.project-osrm.org/route/v1/driving/${futureCoords}?overview=full&geometries=geojson`;
@@ -197,7 +203,40 @@ const renderRouteAndMarkers = async () => {
 
 const markAsDelivered = (index: number) => {
   routeStops.value[index].status = 'COMPLETED';
-  renderRouteAndMarkers(); // Mapa sama się przerysuje na nowe kolory i wyznaczy nowy cel!
+  renderRouteAndMarkers(); 
+};
+
+// --- LONG POLLING ---
+const startLongPolling = async () => {
+  try {
+    const response = await api.get(`/courier/long-poll?last_known_count=${currentStopCount}`);
+    
+    if (response.data.updated) {
+      console.log("Dyspozytor dodał nową paczkę!");
+      currentStopCount = response.data.new_count;
+      
+      const freshRouteResponse = await api.get('/courier/route');
+      
+      // Zabezpieczenie przed utratą zrobionego postępu (statusów COMPLETED)
+      let newStops = freshRouteResponse.data.map((stop: any) => {
+        const existingStop = routeStops.value.find(s => s.stop_id === stop.stop_id);
+        return {
+          ...stop,
+          status: existingStop ? existingStop.status : 'PLANNED'
+        };
+      });
+      
+      newStops = await optimizeRoute(newStops);
+      routeStops.value = newStops;
+      
+      renderRouteAndMarkers();
+    }
+  } catch (error) {
+    console.error("Błąd Long Pollingu. Ponawiam za 5 sekund...", error);
+    await new Promise(resolve => setTimeout(resolve, 5000)); 
+  } finally {
+    startLongPolling();
+  }
 };
 </script>
 

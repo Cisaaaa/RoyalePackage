@@ -8,7 +8,7 @@ import security
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text, func
 import random
-
+import asyncio
 
 # Importujemy bazę danych i modele
 from database import engine, Base, get_db, SessionLocal
@@ -478,3 +478,45 @@ def get_courier_route(
             })
 
     return results
+
+# LONG POLLING - AKTUALIZACJA TRASY NA ŻYWO
+
+@app.get("/api/v1/courier/long-poll", summary="Long Polling dla trasy kuriera")
+async def courier_long_poll(
+    last_known_count: int, # Frontend mówi nam, ile paczek aktualnie widzi
+    db: Session = Depends(get_db),
+    current_user_email: str = Depends(security.get_current_user_email)
+):
+    user = db.query(models.User).filter(models.User.email == current_user_email).first()
+    if not user or user.role_id != 2:
+        raise HTTPException(status_code=403, detail="Brak uprawnień")
+
+    route = db.query(models.Route).filter(
+        models.Route.courier_id == user.user_id,
+        models.Route.status.in_(["PLANNED", "IN_PROGRESS"])
+    ).first()
+
+    if not route:
+        return {"updated": False}
+
+    # Pętla Long Pollingu: Czekamy maksymalnie 20 sekund
+    for _ in range(20):
+        # BARDZO WAŻNE: Wymuszamy na bazie odświeżenie transakcji. 
+        # Bez tego SQLAlchemy nie zobaczyłoby paczek dodanych w DBeaverze!
+        db.commit() 
+        
+        # Sprawdzamy, ile aktualnie przypisanych jest paczek do tej trasy
+        current_count = db.query(models.RouteStop).filter(
+            models.RouteStop.route_id == route.route_id,
+            models.RouteStop.status == "PLANNED"
+        ).count()
+
+        # Jeśli ilość w bazie jest większa niż to, co widzi kurier -> ALARM! Nowa paczka!
+        if current_count > last_known_count:
+            return {"updated": True, "new_count": current_count}
+        
+        # Usypiamy pętlę na 1 sekundę i sprawdzamy znowu
+        await asyncio.sleep(1)
+
+    # Jeśli przez 20 sekund nic się nie wydarzyło, zamykamy połączenie (Frontend otworzy nowe)
+    return {"updated": False}
