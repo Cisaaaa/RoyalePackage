@@ -147,3 +147,45 @@ class Payment(Base):
     amount = Column(Float)
     status = Column(String(50), default="PENDING") # PENDING lub PAID
     transaction_date = Column(DateTime(timezone=True), server_default=func.now())
+
+# ==========================================
+# WARSTWA 4: FLOTA I TRASY (Logistyka Kurierska)
+# ==========================================
+
+class Vehicle(Base):
+    __tablename__ = "vehicles"
+    
+    vehicle_id = Column(Integer, primary_key=True, index=True)
+    registration_number = Column(String(20), unique=True, nullable=False)
+    capacity_kg = Column(Float, nullable=False)
+    status = Column(String(50), default="ACTIVE") # ACTIVE, INACTIVE
+
+class Route(Base):
+    __tablename__ = "routes"
+    
+    route_id = Column(Integer, primary_key=True, index=True)
+    courier_id = Column(Integer, ForeignKey("users.user_id"), nullable=False)
+    vehicle_id = Column(Integer, ForeignKey("vehicles.vehicle_id"), nullable=False)
+    
+    route_date = Column(DateTime(timezone=True), server_default=func.now())
+    route_type = Column(String(50), nullable=False) # np. 'LAST_MILE', 'LINE_HAUL'
+    status = Column(String(50), default="PLANNED") # PLANNED, IN_PROGRESS, COMPLETED
+    
+    # Relacja pozwalająca na łatwe wyciąganie przystanków dla danej trasy
+    stops = relationship("RouteStop", back_populates="route")
+
+class RouteStop(Base):
+    __tablename__ = "route_stops"
+    
+    stop_id = Column(Integer, primary_key=True, index=True)
+    route_id = Column(Integer, ForeignKey("routes.route_id"), nullable=False)
+    parcel_id = Column(Integer, ForeignKey("parcels.parcel_id"), nullable=True) # Nullable, bo przystankiem może być magazyn
+    warehouse_id = Column(Integer, ForeignKey("warehouses.warehouse_id"), nullable=True)
+    
+    stop_order = Column(Integer, nullable=False) # Kolejność (1, 2, 3...) optymalizowana przez OSRM
+    operation_type = Column(String(50), nullable=False) # 'PICKUP', 'DROP_OFF', 'WAREHOUSE_TRANSFER'
+    status = Column(String(50), default="PLANNED") # PLANNED, SUCCESS, FAILED
+    actual_arrival = Column(DateTime(timezone=True), nullable=True)
+
+    # Relacja zwrotna
+    route = relationship("Route", back_populates="stops")
