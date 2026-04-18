@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text, func
 import random
 
+
 # Importujemy bazę danych i modele
 from database import engine, Base, get_db, SessionLocal
 import models 
@@ -432,12 +433,11 @@ def get_courier_route(
     # 4. Składamy dane dla Frontendu i Leafleta
     results = []
     for stop in stops:
+        # SCENARIUSZ A: Zwykła paczka do doręczenia
         if stop.parcel_id and stop.operation_type == "DROP_OFF":
             parcel = db.query(models.Parcel).filter(models.Parcel.parcel_id == stop.parcel_id).first()
             address = db.query(models.Address).filter(models.Address.address_id == parcel.recipient_address_id).first()
 
-            # --- POSTGIS: Tłumaczymy bazę przestrzenną z powrotem na liczby dla Leafleta ---
-            # ST_Y to szerokość (Latitude), a ST_X to długość (Longitude)
             lat = db.scalar(func.ST_Y(address.geom)) if address.geom is not None else None
             lon = db.scalar(func.ST_X(address.geom)) if address.geom is not None else None
 
@@ -448,6 +448,28 @@ def get_courier_route(
                 "operation_type": stop.operation_type,
                 "recipient_name": parcel.recipient_custom_name,
                 "recipient_phone": parcel.recipient_phone,
+                "street": address.street,
+                "building_number": address.building_number,
+                "city": address.city,
+                "lat": lat,
+                "lon": lon
+            })
+        
+        # SCENARIUSZ B: Start z Magazynu (HUB)
+        elif stop.warehouse_id and stop.operation_type == "WAREHOUSE_TRANSFER":
+            warehouse = db.query(models.Warehouse).filter(models.Warehouse.warehouse_id == stop.warehouse_id).first()
+            address = db.query(models.Address).filter(models.Address.address_id == warehouse.address_id).first()
+            
+            lat = db.scalar(func.ST_Y(address.geom)) if address.geom is not None else None
+            lon = db.scalar(func.ST_X(address.geom)) if address.geom is not None else None
+            
+            results.append({
+                "stop_id": stop.stop_id,
+                "parcel_id": 0, # Frontend wymaga liczby
+                "tracking_number": "START TRASY",
+                "operation_type": stop.operation_type,
+                "recipient_name": warehouse.name,
+                "recipient_phone": "-",
                 "street": address.street,
                 "building_number": address.building_number,
                 "city": address.city,
