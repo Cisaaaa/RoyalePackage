@@ -103,6 +103,7 @@ class ParcelResponse(BaseModel):
     tracking_number: str
     status_id: int
     calculated_price: float
+    status_name: str | None = None
 
     class Config:
         from_attributes = True
@@ -127,3 +128,32 @@ class CourierStopResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+# --- 5. SCHEMATY DYSPOZYTORA (Tworzenie Tras) ---
+
+class DispatcherParcelResponse(BaseModel):
+    parcel_id: int
+    tracking_number: str
+    recipient_city: str
+    recipient_street: str
+    recipient_name: str
+    calculated_price: float
+
+    class Config:
+        from_attributes = True
+
+class FleetResponse(BaseModel):
+    user_id: int
+    first_name: str
+    last_name: str
+    
+class VehicleResponse(BaseModel):
+    vehicle_id: int
+    registration_number: str
+    capacity_kg: float
+
+class RouteCreateRequest(BaseModel):
+    courier_id: int = Field(..., description="ID wybranego kuriera")
+    vehicle_id: int = Field(..., description="ID wybranego pojazdu")
+    parcel_ids: list[int] = Field(..., description="Lista ID paczek zaznaczonych checkboxami")

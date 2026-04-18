@@ -391,12 +391,30 @@ def get_user_parcels(
     db: Session = Depends(get_db),
     current_user_email: str = Depends(security.get_current_user_email)
 ):
+    # 1. Identyfikujemy zalogowanego użytkownika (bez zmian)
     current_user = db.query(models.User).filter(models.User.email == current_user_email).first()
     if not current_user:
         raise HTTPException(status_code=404, detail="Nie znaleziono użytkownika")
-    # Pobieramy wszystkie paczki, gdzie zalogowany użytkownik jest nadawcą
-    parcels = db.query(models.Parcel).filter(models.Parcel.sender_id == current_user.user_id).all()
-    return parcels
+    
+    # 2. Zmieniamy zapytanie: prosimy o paczkę ORAZ nazwę statusu.
+    # .join łączy tabelę Parcel z tabelą Status tam, gdzie zgadzają się ID statusów.
+    results = db.query(models.Parcel, models.Status.status_name).join(
+        models.Status, models.Parcel.status_id == models.Status.status_id
+    ).filter(models.Parcel.sender_id == current_user.user_id).all()
+    
+    # 3. Ponieważ wynik z JOINa to lista krotek (parcel, status_name), 
+    # musimy je "przepakować" do formatu, który rozumie schemat ParcelResponse.
+    response = []
+    for parcel, status_name in results:
+        response.append({
+            "parcel_id": parcel.parcel_id,
+            "tracking_number": parcel.tracking_number,
+            "status_id": parcel.status_id,
+            "calculated_price": parcel.calculated_price,
+            "status_name": status_name  # Przekazujemy tekstową nazwę do frontendu
+        })
+    
+    return response
 
 # WIDOK KURIERA - TRASY I PINEZKI NA MAPIE
 
@@ -478,6 +496,157 @@ def get_courier_route(
             })
 
     return results
+
+
+# PANEL DYSPOZYTORA - ZARZĄDZANIE TRASAMI
+
+
+@app.get("/api/v1/dispatcher/unassigned-parcels", summary="Pobierz paczki do przypisania")
+def get_unassigned_parcels(
+    db: Session = Depends(get_db),
+    current_user_email: str = Depends(security.get_current_user_email)
+):
+    # 1. Sprawdzamy uprawnienia (Tylko Dyspozytor - rola 3)
+    user = db.query(models.User).filter(models.User.email == current_user_email).first()
+    if not user or user.role_id != 3:
+        raise HTTPException(status_code=403, detail="Brak uprawnień. Widok tylko dla Dyspozytora.")
+
+    # 2. Szukamy paczek ze statusem 2 ("W magazynie nadawczym"), które NIE MAJĄ jeszcze rekordu w route_stops
+    unassigned_parcels = db.query(models.Parcel).outerjoin(
+        models.RouteStop, models.Parcel.parcel_id == models.RouteStop.parcel_id
+    ).filter(
+        models.Parcel.status_id == 2,
+        models.RouteStop.stop_id == None # Magia SQL: Zwróć tylko te, które nie połączyły się z trasą
+    ).all()
+
+    # 3. Składamy dane dla widoku tabeli na frontendzie
+    results = []
+    for parcel in unassigned_parcels:
+        address = db.query(models.Address).filter(models.Address.address_id == parcel.recipient_address_id).first()
+        results.append({
+            "parcel_id": parcel.parcel_id,
+            "tracking_number": parcel.tracking_number,
+            "recipient_city": address.city if address else "Brak danych",
+            "recipient_street": address.street if address else "Brak danych",
+            "recipient_name": parcel.recipient_custom_name,
+            "calculated_price": parcel.calculated_price
+        })
+    return results
+
+@app.get("/api/v1/dispatcher/fleet", summary="Pobierz listę kurierów i pojazdów")
+def get_fleet(
+    db: Session = Depends(get_db),
+    current_user_email: str = Depends(security.get_current_user_email)
+):
+    # 1. Sprawdzamy uprawnienia (Tylko Dyspozytor - rola 3)
+    user = db.query(models.User).filter(models.User.email == current_user_email).first()
+    if not user or user.role_id != 3:
+        raise HTTPException(status_code=403, detail="Brak uprawnień.")
+    
+    # 2. Pobieramy listę aktywnych kurierów i pojazdów z bazy danych
+    couriers = db.query(models.User).filter(models.User.role_id == 2).all()
+    vehicles = db.query(models.Vehicle).filter(models.Vehicle.status == "ACTIVE").all()
+
+    # 3. Składamy dane do zwrócenia na frontend
+    return {
+        "couriers": [{"user_id": c.user_id, "first_name": c.first_name, "last_name": c.last_name} for c in couriers],
+        "vehicles": [{"vehicle_id": v.vehicle_id, "registration_number": v.registration_number, "capacity_kg": v.capacity_kg} for v in vehicles]
+    }
+
+
+@app.post("/api/v1/dispatcher/routes", status_code=status.HTTP_201_CREATED, summary="Utwórz nową trasę (Zapisz do bazy)")
+def create_route(
+    request: schemas.RouteCreateRequest,
+    db: Session = Depends(get_db),
+    current_user_email: str = Depends(security.get_current_user_email)
+):
+    user = db.query(models.User).filter(models.User.email == current_user_email).first()
+    if not user or user.role_id != 3:
+        raise HTTPException(status_code=403, detail="Brak uprawnień.")
+
+    if not request.parcel_ids:
+        raise HTTPException(status_code=400, detail="Nie wybrano żadnych paczek do trasy.")
+
+# 1. Tworzymy główny rekord TRASY
+    new_route = models.Route(
+        courier_id=request.courier_id,
+        vehicle_id=request.vehicle_id,
+        route_type="LAST_MILE",
+        status="PLANNED"
+    )
+    db.add(new_route)
+    db.flush() # Flush przydziela ID do trasy, ale jeszcze nie zapisuje trwale w bazie
+
+    # 2. Tworzymy PRZYSTANKI (RouteStops) dla każdej zaznaczonej paczki
+    for idx, p_id in enumerate(request.parcel_ids):
+        # Kolejność (stop_order) na razie dajemy po kolei (idx + 1). W przyszłości zajmie się tym OSRM
+        stop = models.RouteStop(
+            route_id=new_route.route_id,
+            parcel_id=p_id,
+            stop_order=idx + 1,
+            operation_type="DROP_OFF",
+            status="PLANNED"
+        )
+        db.add(stop)
+
+# 3. Aktualizujemy status paczki na 4 ("Wydana kurierowi")
+        parcel = db.query(models.Parcel).filter(models.Parcel.parcel_id == p_id).first()
+        if parcel:
+            parcel.status_id = 4 # Zgodnie z auto-seedingiem: 4 = Wydana kurierowi
+            
+    # 4. Zatwierdzamy całą transakcję
+    db.commit()
+    
+    return {"message": "Trasa utworzona pomyślnie", "route_id": new_route.route_id}
+
+
+
+# OBSŁUGA KURIERA - DORĘCZENIE PACZKI
+@app.put("/api/v1/courier/parcels/{parcel_id}/deliver", summary="Oznacz paczkę jako doręczoną")
+def mark_parcel_delivered(
+    parcel_id: int,
+    db: Session = Depends(get_db),
+    current_user_email: str = Depends(security.get_current_user_email)
+):
+    user = db.query(models.User).filter(models.User.email == current_user_email).first()
+    if not user or user.role_id != 2:
+        raise HTTPException(status_code=403, detail="Brak uprawnień.")
+
+    parcel = db.query(models.Parcel).filter(models.Parcel.parcel_id == parcel_id).first()
+    if not parcel:
+        raise HTTPException(status_code=404, detail="Nie znaleziono paczki")
+
+    parcel.status_id = 5
+
+    stop = db.query(models.RouteStop).filter(
+        models.RouteStop.parcel_id == parcel_id,
+        models.RouteStop.status == "PLANNED"
+    ).first()
+    
+    if stop:
+        stop.status = "COMPLETED"
+        
+        # --- AUTOMATYCZNE ZAMYKANIE TRASY ---
+        # Sprawdzamy, czy na tej trasie zostały jeszcze jakieś paczki do doręczenia (PLANNED lub IN_PROGRESS)
+        remaining_stops = db.query(models.RouteStop).filter(
+            models.RouteStop.route_id == stop.route_id,
+            models.RouteStop.status.in_(["PLANNED", "IN_PROGRESS"])
+        ).count()
+        
+        if remaining_stops == 0:
+            # Jeśli to była ostatnia paczka (zwróciło 0), zamykamy całą trasę!
+            route = db.query(models.Route).filter(models.Route.route_id == stop.route_id).first()
+            if route:
+                route.status = "COMPLETED"
+        # --------------------------------------------
+
+    db.commit()
+
+    return {"message": "Paczka doręczona pomyślnie. Jeśli to była ostatnia, trasa została zamknięta."}
+
+
+
+
 
 # LONG POLLING - AKTUALIZACJA TRASY NA ŻYWO
 
