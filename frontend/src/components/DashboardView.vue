@@ -89,15 +89,13 @@
         <v-row class="mb-4 text-center">
           <v-col>
             <h1 class="text-white">Panel Kuriera</h1>
+            <p class="text-grey-lighten-1">Zarządzaj swoją dzisiejszą trasą i doręczeniami.</p>
           </v-col>
         </v-row>
+        
         <v-row justify="center">
-          <v-col cols="12" md="8">
-            <v-card class="pa-10 text-center" color="#0B172A" elevation="3">
-              <v-icon size="80" color="#E5B338">mdi-truck-delivery</v-icon>
-              <h2 class="mt-4 text-white">Trasa na dziś</h2>
-              <p class="text-grey-lighten-1 mt-2 text-body-1">Brak przesyłek do doręczenia. Możesz odpocząć!</p>
-            </v-card>
+          <v-col cols="12" lg="10">
+            <CourierMap />
           </v-col>
         </v-row>
       </div>
@@ -126,6 +124,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue';
 import ParcelForm from './ParcelForm.vue';
+import CourierMap from './CourierMap.vue';
 import { useRouter } from 'vue-router';
 import api from '../api/axios'; // KLUCZOWY DODATEK: nasz komunikator z backendem
 

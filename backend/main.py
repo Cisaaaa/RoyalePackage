@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 import schemas
 import security
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import text
+from sqlalchemy import text, func
 import random
 
 # Importujemy bazę danych i modele
@@ -396,3 +396,63 @@ def get_user_parcels(
     # Pobieramy wszystkie paczki, gdzie zalogowany użytkownik jest nadawcą
     parcels = db.query(models.Parcel).filter(models.Parcel.sender_id == current_user.user_id).all()
     return parcels
+
+# WIDOK KURIERA - TRASY I PINEZKI NA MAPIE
+
+@app.get("/api/v1/courier/route", response_model=list[schemas.CourierStopResponse], summary="Pobierz dzisiejszą trasę kuriera")
+def get_courier_route(
+    db: Session = Depends(get_db),
+    current_user_email: str = Depends(security.get_current_user_email)
+):
+    # 1. Sprawdzamy kim jest użytkownik i czy to na pewno Kurier
+    user = db.query(models.User).filter(models.User.email == current_user_email).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="Nie znaleziono użytkownika")
+    
+    # Zakładamy, że rola "Kurier" to ID 2 (według naszego seedyngu bazy)
+    if user.role_id != 2:
+        raise HTTPException(status_code=403, detail="Brak uprawnień. Ten widok jest tylko dla kurierów.")
+
+    # 2. Szukamy aktywnej trasy dla tego kuriera (zaplanowanej lub w trakcie)
+    route = db.query(models.Route).filter(
+        models.Route.courier_id == user.user_id,
+        models.Route.status.in_(["PLANNED", "IN_PROGRESS"])
+    ).first()
+
+    # Jeśli dyspozytor nie przydzielił mu jeszcze trasy, zwracamy pustą listę
+    if not route:
+        return []
+
+    # 3. Pobieramy przystanki dla tej trasy, posortowane według kolejności (stop_order)
+    stops = db.query(models.RouteStop).filter(
+        models.RouteStop.route_id == route.route_id,
+        models.RouteStop.status == "PLANNED"
+    ).order_by(models.RouteStop.stop_order).all()
+
+    # 4. Składamy dane dla Frontendu i Leafleta
+    results = []
+    for stop in stops:
+        if stop.parcel_id and stop.operation_type == "DROP_OFF":
+            parcel = db.query(models.Parcel).filter(models.Parcel.parcel_id == stop.parcel_id).first()
+            address = db.query(models.Address).filter(models.Address.address_id == parcel.recipient_address_id).first()
+
+            # --- POSTGIS: Tłumaczymy bazę przestrzenną z powrotem na liczby dla Leafleta ---
+            # ST_Y to szerokość (Latitude), a ST_X to długość (Longitude)
+            lat = db.scalar(func.ST_Y(address.geom)) if address.geom is not None else None
+            lon = db.scalar(func.ST_X(address.geom)) if address.geom is not None else None
+
+            results.append({
+                "stop_id": stop.stop_id,
+                "parcel_id": parcel.parcel_id,
+                "tracking_number": parcel.tracking_number,
+                "operation_type": stop.operation_type,
+                "recipient_name": parcel.recipient_custom_name,
+                "recipient_phone": parcel.recipient_phone,
+                "street": address.street,
+                "building_number": address.building_number,
+                "city": address.city,
+                "lat": lat,
+                "lon": lon
+            })
+
+    return results

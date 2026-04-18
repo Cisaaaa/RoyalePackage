@@ -111,3 +111,19 @@ class ParcelResponse(BaseModel):
 # --- 4. INNE ---
 class RefreshTokenRequest(BaseModel):
     refresh_token: str
+
+class CourierStopResponse(BaseModel):
+    stop_id: int
+    parcel_id: int
+    tracking_number: str
+    operation_type: str
+    recipient_name: str
+    recipient_phone: str
+    street: str
+    building_number: str
+    city: str
+    lat: float | None
+    lon: float | None
+
+    class Config:
+        from_attributes = True
