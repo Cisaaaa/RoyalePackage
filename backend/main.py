@@ -10,6 +10,8 @@ from sqlalchemy import text, func
 import random
 import asyncio
 
+import requests
+
 # Importujemy bazę danych i modele
 from database import engine, Base, get_db, SessionLocal
 import models 
@@ -428,7 +430,6 @@ def get_courier_route(
     if not user:
         raise HTTPException(status_code=404, detail="Nie znaleziono użytkownika")
     
-    # Zakładamy, że rola "Kurier" to ID 2 (według naszego seedyngu bazy)
     if user.role_id != 2:
         raise HTTPException(status_code=403, detail="Brak uprawnień. Ten widok jest tylko dla kurierów.")
 
@@ -448,6 +449,9 @@ def get_courier_route(
         models.RouteStop.status == "PLANNED"
     ).order_by(models.RouteStop.stop_order).all()
 
+    # Przygotowujemy kuloodporne zapytanie SQL do wyciągania GPS z PostGIS
+    sql_coords = text("SELECT ST_X(geom) as lon, ST_Y(geom) as lat FROM addresses WHERE address_id = :id AND geom IS NOT NULL")
+
     # 4. Składamy dane dla Frontendu i Leafleta
     results = []
     for stop in stops:
@@ -456,8 +460,12 @@ def get_courier_route(
             parcel = db.query(models.Parcel).filter(models.Parcel.parcel_id == stop.parcel_id).first()
             address = db.query(models.Address).filter(models.Address.address_id == parcel.recipient_address_id).first()
 
-            lat = db.scalar(func.ST_Y(address.geom)) if address.geom is not None else None
-            lon = db.scalar(func.ST_X(address.geom)) if address.geom is not None else None
+            # Pobieramy współrzędne surowym SQL-em
+            lat, lon = None, None
+            if address:
+                coords = db.execute(sql_coords, {"id": address.address_id}).fetchone()
+                if coords and coords[0] is not None and coords[1] is not None:
+                    lon, lat = coords[0], coords[1]
 
             results.append({
                 "stop_id": stop.stop_id,
@@ -478,12 +486,16 @@ def get_courier_route(
             warehouse = db.query(models.Warehouse).filter(models.Warehouse.warehouse_id == stop.warehouse_id).first()
             address = db.query(models.Address).filter(models.Address.address_id == warehouse.address_id).first()
             
-            lat = db.scalar(func.ST_Y(address.geom)) if address.geom is not None else None
-            lon = db.scalar(func.ST_X(address.geom)) if address.geom is not None else None
+            # Pobieramy współrzędne surowym SQL-em
+            lat, lon = None, None
+            if address:
+                coords = db.execute(sql_coords, {"id": address.address_id}).fetchone()
+                if coords and coords[0] is not None and coords[1] is not None:
+                    lon, lat = coords[0], coords[1]
             
             results.append({
                 "stop_id": stop.stop_id,
-                "parcel_id": 0, # Frontend wymaga liczby
+                "parcel_id": 0, 
                 "tracking_number": "START TRASY",
                 "operation_type": stop.operation_type,
                 "recipient_name": warehouse.name,
@@ -554,7 +566,8 @@ def get_fleet(
     }
 
 
-@app.post("/api/v1/dispatcher/routes", status_code=status.HTTP_201_CREATED, summary="Utwórz nową trasę (Zapisz do bazy)")
+
+@app.post("/api/v1/dispatcher/routes", status_code=status.HTTP_201_CREATED, summary="Utwórz i zoptymalizuj trasę")
 def create_route(
     request: schemas.RouteCreateRequest,
     db: Session = Depends(get_db),
@@ -565,39 +578,112 @@ def create_route(
         raise HTTPException(status_code=403, detail="Brak uprawnień.")
 
     if not request.parcel_ids:
-        raise HTTPException(status_code=400, detail="Nie wybrano żadnych paczek do trasy.")
+        raise HTTPException(status_code=400, detail="Nie wybrano paczek do trasy.")
 
-# 1. Tworzymy główny rekord TRASY
+    # ==========================================
+    # 1. ZBIERANIE GPS - OPCJA ATOMOWA (RAW SQL)
+    # ==========================================
+    warehouse = db.query(models.Warehouse).filter(models.Warehouse.warehouse_id == 1).first()
+    if not warehouse:
+        raise HTTPException(status_code=500, detail="Brak Magazynu (ID=1) w bazie danych.")
+    
+    # Surowe zapytanie SQL, które omija błędy biblioteki GeoAlchemy2
+    sql_coords = text("SELECT ST_X(geom) as lon, ST_Y(geom) as lat FROM addresses WHERE address_id = :id AND geom IS NOT NULL")
+    
+    wh_result = db.execute(sql_coords, {"id": warehouse.address_id}).fetchone()
+    if not wh_result or wh_result[0] is None or wh_result[1] is None:
+        raise HTTPException(status_code=500, detail="Brak współrzędnych Magazynu (ID=1) w bazie.")
+
+    wh_lon, wh_lat = wh_result[0], wh_result[1]
+    coords = [f"{wh_lon},{wh_lat}"] # Indeks 0 to nasz Magazyn
+    
+    parcels = db.query(models.Parcel).filter(models.Parcel.parcel_id.in_(request.parcel_ids)).all()
+    parcel_mapping = {}
+
+    for idx, parcel in enumerate(parcels, start=1):
+        p_result = db.execute(sql_coords, {"id": parcel.recipient_address_id}).fetchone()
+        
+        if p_result and p_result[0] is not None and p_result[1] is not None:
+            coords.append(f"{p_result[0]},{p_result[1]}")
+            parcel_mapping[idx] = parcel.parcel_id
+        else:
+            raise HTTPException(status_code=400, detail=f"Paczka {parcel.tracking_number} nie ma wpisanych współrzędnych GPS!")
+
+    # ==========================================
+    # 2. KOMUNIKACJA Z OSRM (Algorytm VRP)
+    # ==========================================
+    coords_str = ";".join(coords)
+    osrm_url = f"http://router.project-osrm.org/trip/v1/driving/{coords_str}?source=first&roundtrip=false"
+
+    try:
+        osrm_response = requests.get(osrm_url, timeout=10)
+        osrm_data = osrm_response.json()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="Błąd łączenia z silnikiem optymalizacji OSRM.")
+
+    if osrm_data.get("code") != "Ok":
+        raise HTTPException(status_code=500, detail="OSRM nie potrafił wyznaczyć trasy dla podanych adresów.")
+
+    # ==========================================
+    # 3. WYLICZENIA FINANSOWE
+    # ==========================================
+    trip = osrm_data["trips"][0]
+    total_distance_km = trip["distance"] / 1000.0
+    total_revenue = sum(p.calculated_price for p in parcels)
+
+    FUEL_PRICE = 6.50         
+    BURN_RATE = 10.0 / 100.0  
+    COURIER_FLAT_FEE = 50.0   
+    COURIER_PER_PARCEL = 2.0  
+
+    cost_fuel = total_distance_km * BURN_RATE * FUEL_PRICE
+    cost_courier = COURIER_FLAT_FEE + (len(parcels) * COURIER_PER_PARCEL)
+    route_cost = cost_fuel + cost_courier
+
+    # ==========================================
+    # 4. ZAPIS DO BAZY DANYCH
+    # ==========================================
     new_route = models.Route(
         courier_id=request.courier_id,
         vehicle_id=request.vehicle_id,
         route_type="LAST_MILE",
-        status="PLANNED"
+        status="PLANNED",
+        total_distance_km=total_distance_km,
+        total_revenue=total_revenue,
+        route_cost=route_cost
     )
     db.add(new_route)
-    db.flush() # Flush przydziela ID do trasy, ale jeszcze nie zapisuje trwale w bazie
+    db.flush()
 
-    # 2. Tworzymy PRZYSTANKI (RouteStops) dla każdej zaznaczonej paczki
-    for idx, p_id in enumerate(request.parcel_ids):
-        # Kolejność (stop_order) na razie dajemy po kolei (idx + 1). W przyszłości zajmie się tym OSRM
+    # Magia Pythona - enumerate automatycznie przypisze nam indeks 0, 1, 2... jako orig_idx
+    for orig_idx, waypoint in enumerate(osrm_data["waypoints"]):
+        if orig_idx == 0:
+            continue # Pomijamy punkt zerowy (nasz Magazyn)
+            
+        p_id = parcel_mapping[orig_idx]
+        optimal_stop_order = waypoint["waypoint_index"] 
+
         stop = models.RouteStop(
             route_id=new_route.route_id,
             parcel_id=p_id,
-            stop_order=idx + 1,
+            stop_order=optimal_stop_order,
             operation_type="DROP_OFF",
             status="PLANNED"
         )
         db.add(stop)
 
-# 3. Aktualizujemy status paczki na 4 ("Wydana kurierowi")
-        parcel = db.query(models.Parcel).filter(models.Parcel.parcel_id == p_id).first()
-        if parcel:
-            parcel.status_id = 4 # Zgodnie z auto-seedingiem: 4 = Wydana kurierowi
-            
-    # 4. Zatwierdzamy całą transakcję
+        parcel_to_update = next(p for p in parcels if p.parcel_id == p_id)
+        parcel_to_update.status_id = 4 
+
     db.commit()
     
-    return {"message": "Trasa utworzona pomyślnie", "route_id": new_route.route_id}
+    return {
+        "message": "Trasa zoptymalizowana i zapisana.",
+        "route_id": new_route.route_id
+    }
+
+
+
 
 
 
@@ -689,3 +775,45 @@ async def courier_long_poll(
 
     # Jeśli przez 20 sekund nic się nie wydarzyło, zamykamy połączenie (Frontend otworzy nowe)
     return {"updated": False}
+
+
+@app.get("/api/v1/dispatcher/reports", response_model=list[schemas.RouteReportResponse], summary="Pobierz raporty finansowe tras")
+def get_route_reports(
+    db: Session = Depends(get_db),
+    current_user_email: str = Depends(security.get_current_user_email)
+):
+    user = db.query(models.User).filter(models.User.email == current_user_email).first()
+    if not user or user.role_id != 3:
+        raise HTTPException(status_code=403, detail="Brak uprawnień.")
+
+    # Pobieramy tylko trasy, które mają policzone kilometry
+    routes = db.query(models.Route).filter(models.Route.total_distance_km != None).order_by(models.Route.route_id.desc()).all()
+    
+    reports = []
+    for r in routes:
+        # Szukamy imienia kuriera
+        courier = db.query(models.User).filter(models.User.user_id == r.courier_id).first()
+        courier_name = f"{courier.first_name} {courier.last_name}" if courier else "Nieznany Kurier"
+        
+        # Szukamy rejestracji pojazdu
+        vehicle = db.query(models.Vehicle).filter(models.Vehicle.vehicle_id == r.vehicle_id).first()
+        vehicle_reg = vehicle.registration_number if vehicle else "Brak Danych"
+        
+        # Liczymy ile paczek przypisano do tej trasy
+        parcels_count = db.query(models.RouteStop).filter(
+            models.RouteStop.route_id == r.route_id,
+            models.RouteStop.operation_type == "DROP_OFF"
+        ).count()
+
+        reports.append({
+            "route_id": r.route_id,
+            "courier_name": courier_name,
+            "vehicle_registration": vehicle_reg,
+            "total_distance_km": round(r.total_distance_km, 2),
+            "total_revenue": round(r.total_revenue, 2),
+            "route_cost": round(r.route_cost, 2),
+            "net_profit": round(r.total_revenue - r.route_cost, 2), # Czysty zysk
+            "parcels_delivered": parcels_count
+        })
+        
+    return reports
