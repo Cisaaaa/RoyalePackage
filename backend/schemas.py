@@ -157,3 +157,16 @@ class RouteCreateRequest(BaseModel):
     courier_id: int = Field(..., description="ID wybranego kuriera")
     vehicle_id: int = Field(..., description="ID wybranego pojazdu")
     parcel_ids: list[int] = Field(..., description="Lista ID paczek zaznaczonych checkboxami")
+
+class RouteReportResponse(BaseModel):
+    route_id: int
+    courier_name: str
+    vehicle_registration: str
+    total_distance_km: float
+    total_revenue: float
+    route_cost: float
+    net_profit: float  # Czysty zysk (Przychód - Koszt)
+    parcels_delivered: int
+
+    class Config:
+        from_attributes = True

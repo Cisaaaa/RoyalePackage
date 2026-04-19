@@ -102,6 +102,8 @@ class Parcel(Base):
     recipient_address_id = Column(Integer, ForeignKey("addresses.address_id"), nullable=False)
     tariff_id = Column(Integer, ForeignKey("dimensional_tariffs.tariff_id"), nullable=False)
     current_warehouse_id = Column(Integer, ForeignKey("warehouses.warehouse_id"), nullable=True)
+
+    target_region_id = Column(Integer, ForeignKey("regions.region_id"), nullable=True) # Gdzie paczka ma ostatecznie trafić
     
     # --- NOWE/ZMODYFIKOWANE POLA ---
     # Zapisujemy rzeczywiste dane z etykiety, niezależnie od tego kto jest zalogowany
@@ -170,6 +172,11 @@ class Route(Base):
     route_date = Column(DateTime(timezone=True), server_default=func.now())
     route_type = Column(String(50), nullable=False) # np. 'LAST_MILE', 'LINE_HAUL'
     status = Column(String(50), default="PLANNED") # PLANNED, IN_PROGRESS, COMPLETED
+
+    # --- NOWOŚĆ: Finanse i VRP ---
+    total_distance_km = Column(Float, nullable=True) # Dystans z OSRM
+    total_revenue = Column(Float, nullable=True)     # Przychód z paczek na trasie
+    route_cost = Column(Float, nullable=True)        # Koszt paliwa i kuriera
     
     # Relacja pozwalająca na łatwe wyciąganie przystanków dla danej trasy
     stops = relationship("RouteStop", back_populates="route")
