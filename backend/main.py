@@ -689,6 +689,7 @@ def mark_parcel_delivered(
     if not parcel:
         raise HTTPException(status_code=404, detail="Nie znaleziono paczki")
 
+    # Zmiana statusu paczki
     parcel.status_id = 5
 
     stop = db.query(models.RouteStop).filter(
@@ -699,24 +700,27 @@ def mark_parcel_delivered(
     if stop:
         stop.status = "COMPLETED"
         
+        # TO JEST KLUCZ: Wymuszamy synchronizację pamięci Pythona z bazą danych
+        db.flush() 
+        
         # --- AUTOMATYCZNE ZAMYKANIE TRASY ---
-        # Sprawdzamy, czy na tej trasie zostały jeszcze jakieś paczki do doręczenia (PLANNED lub IN_PROGRESS)
+        # Teraz baza wie, że ten konkretny stop jest COMPLETED, więc go nie policzy
         remaining_stops = db.query(models.RouteStop).filter(
             models.RouteStop.route_id == stop.route_id,
             models.RouteStop.status.in_(["PLANNED", "IN_PROGRESS"])
         ).count()
         
         if remaining_stops == 0:
-            # Jeśli to była ostatnia paczka (zwróciło 0), zamykamy całą trasę!
+            # Jeśli to była ostatnia paczka, zamykamy całą trasę!
             route = db.query(models.Route).filter(models.Route.route_id == stop.route_id).first()
             if route:
                 route.status = "COMPLETED"
         # --------------------------------------------
 
+    # Zapisujemy wszystko ostatecznie w bazie (paczka, stop i trasa)
     db.commit()
 
     return {"message": "Paczka doręczona pomyślnie. Jeśli to była ostatnia, trasa została zamknięta."}
-
 
 
 
