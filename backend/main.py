@@ -569,10 +569,12 @@ def get_fleet(
 
 @app.post("/api/v1/dispatcher/routes", status_code=status.HTTP_201_CREATED, summary="Utwórz i zoptymalizuj trasę")
 def create_route(
+    # Otrzymujemy listę ID paczek, ID kuriera i ID pojazdu do stworzenia trasy
     request: schemas.RouteCreateRequest,
     db: Session = Depends(get_db),
     current_user_email: str = Depends(security.get_current_user_email)
 ):
+    # Sprawdzamy uprawnienia (Tylko Dyspozytor - rola 3)
     user = db.query(models.User).filter(models.User.email == current_user_email).first()
     if not user or user.role_id != 3:
         raise HTTPException(status_code=403, detail="Brak uprawnień.")
@@ -580,69 +582,68 @@ def create_route(
     if not request.parcel_ids:
         raise HTTPException(status_code=400, detail="Nie wybrano paczek do trasy.")
 
-    # ==========================================
-    # 1. ZBIERANIE GPS - OPCJA ATOMOWA (RAW SQL)
-    # ==========================================
+    # 1. Dane pojazdu i limity (VROOM wymaga [waga, objętość])
+    vehicle = db.query(models.Vehicle).filter(models.Vehicle.vehicle_id == request.vehicle_id).first()
+    if not vehicle:
+        raise HTTPException(status_code=404, detail="Nie znaleziono pojazdu.")
+    
+    # Przeliczamy m3 na int (x100) dla VROOM
+    vroom_capacity = [int(vehicle.capacity_kg), int((vehicle.capacity_m3 or 0.1) * 100)]
+
+    # 2. Współrzędne Magazynu (Start/End)
     warehouse = db.query(models.Warehouse).filter(models.Warehouse.warehouse_id == 1).first()
-    if not warehouse:
-        raise HTTPException(status_code=500, detail="Brak Magazynu (ID=1) w bazie danych.")
-    
-    # Surowe zapytanie SQL, które omija błędy biblioteki GeoAlchemy2
     sql_coords = text("SELECT ST_X(geom) as lon, ST_Y(geom) as lat FROM addresses WHERE address_id = :id AND geom IS NOT NULL")
-    
     wh_result = db.execute(sql_coords, {"id": warehouse.address_id}).fetchone()
-    if not wh_result or wh_result[0] is None or wh_result[1] is None:
-        raise HTTPException(status_code=500, detail="Brak współrzędnych Magazynu (ID=1) w bazie.")
-
-    wh_lon, wh_lat = wh_result[0], wh_result[1]
-    coords = [f"{wh_lon},{wh_lat}"] # Indeks 0 to nasz Magazyn
     
+    if not wh_result:
+        raise HTTPException(status_code=500, detail="Brak współrzędnych Magazynu (ID=1).")
+    # VROOM wymaga formatu [lon, lat] dla współrzędnych
+    vroom_vehicle = {
+        "id": vehicle.vehicle_id,
+        "profile": "car",
+        "start": [wh_result[0], wh_result[1]],
+        "end": [wh_result[0], wh_result[1]],
+        "capacity": vroom_capacity
+    }
+
+    # 3. Zadania (Paczki)
     parcels = db.query(models.Parcel).filter(models.Parcel.parcel_id.in_(request.parcel_ids)).all()
-    parcel_mapping = {}
-
-    for idx, parcel in enumerate(parcels, start=1):
+    vroom_jobs = []
+    total_revenue = 0.0
+    # Pobieramy współrzędne odbiorców i przygotowujemy dane dla VROOM
+    for parcel in parcels:
         p_result = db.execute(sql_coords, {"id": parcel.recipient_address_id}).fetchone()
+        if not p_result:
+            continue
+        # Pobieramy taryfę, żeby wiedzieć, ile "zajmuje" paczka w sensie wagi i objętości dla VROOM
+        tariff = db.query(models.DimensionalTariff).filter(models.DimensionalTariff.tariff_id == parcel.tariff_id).first()
+        job_delivery = [int(tariff.max_weight_kg), int(tariff.max_volume_m3 * 100)]
         
-        if p_result and p_result[0] is not None and p_result[1] is not None:
-            coords.append(f"{p_result[0]},{p_result[1]}")
-            parcel_mapping[idx] = parcel.parcel_id
-        else:
-            raise HTTPException(status_code=400, detail=f"Paczka {parcel.tracking_number} nie ma wpisanych współrzędnych GPS!")
+        vroom_jobs.append({
+            "id": parcel.parcel_id,
+            "location": [p_result[0], p_result[1]],
+            "delivery": job_delivery
+        })
+        total_revenue += parcel.calculated_price
 
-    # ==========================================
-    # 2. KOMUNIKACJA Z OSRM (Algorytm VRP)
-    # ==========================================
-    coords_str = ";".join(coords)
-    osrm_url = f"http://router.project-osrm.org/trip/v1/driving/{coords_str}?source=first&roundtrip=false"
-
+    # 4. Strzał do VROOM
+    payload = {"vehicles": [vroom_vehicle], "jobs": vroom_jobs}
     try:
-        osrm_response = requests.get(osrm_url, timeout=10)
-        osrm_data = osrm_response.json()
+        response = requests.post("http://vroom:3000/", json=payload, timeout=20) # VROOM jest w innym kontenerze, więc używamy nazwy usługi "vroom"
+        vroom_data = response.json()
     except Exception as e:
-        raise HTTPException(status_code=500, detail="Błąd łączenia z silnikiem optymalizacji OSRM.")
+        raise HTTPException(status_code=500, detail=f"Błąd silnika VROOM: {e}")
+    # VROOM zwraca "code": 0, gdy wszystko poszło dobrze. Inaczej jest jakiś problem z danymi lub konfiguracją.
+    if vroom_data.get("code") != 0:
+        raise HTTPException(status_code=500, detail=f"VROOM Error: {vroom_data.get('error')}")
 
-    if osrm_data.get("code") != "Ok":
-        raise HTTPException(status_code=500, detail="OSRM nie potrafił wyznaczyć trasy dla podanych adresów.")
-
-    # ==========================================
-    # 3. WYLICZENIA FINANSOWE
-    # ==========================================
-    trip = osrm_data["trips"][0]
-    total_distance_km = trip["distance"] / 1000.0
-    total_revenue = sum(p.calculated_price for p in parcels)
-
-    FUEL_PRICE = 6.50         
-    BURN_RATE = 10.0 / 100.0  
-    COURIER_FLAT_FEE = 50.0   
-    COURIER_PER_PARCEL = 2.0  
-
-    cost_fuel = total_distance_km * BURN_RATE * FUEL_PRICE
-    cost_courier = COURIER_FLAT_FEE + (len(parcels) * COURIER_PER_PARCEL)
-    route_cost = cost_fuel + cost_courier
-
-    # ==========================================
-    # 4. ZAPIS DO BAZY DANYCH
-    # ==========================================
+    # 5. Zapis trasy (Bierzemy pod uwagę nową kolejność!)
+    route_info = vroom_data["routes"][0]
+    total_distance_km = route_info["distance"] / 1000.0
+    
+    # Koszty (prosta symulacja: paliwo + stawka kuriera) [cite: 144, 145]
+    route_cost = (total_distance_km * 0.1 * 6.50) + 50.0 + (len(vroom_jobs) * 2.0)
+    # Tworzymy rekord trasy w bazie danych
     new_route = models.Route(
         courier_id=request.courier_id,
         vehicle_id=request.vehicle_id,
@@ -654,34 +655,20 @@ def create_route(
     )
     db.add(new_route)
     db.flush()
-
-    # Magia Pythona - enumerate automatycznie przypisze nam indeks 0, 1, 2... jako orig_idx
-    for orig_idx, waypoint in enumerate(osrm_data["waypoints"]):
-        if orig_idx == 0:
-            continue # Pomijamy punkt zerowy (nasz Magazyn)
-            
-        p_id = parcel_mapping[orig_idx]
-        optimal_stop_order = waypoint["waypoint_index"] 
-
-        stop = models.RouteStop(
-            route_id=new_route.route_id,
-            parcel_id=p_id,
-            stop_order=optimal_stop_order,
-            operation_type="DROP_OFF",
-            status="PLANNED"
-        )
-        db.add(stop)
-
-        parcel_to_update = next(p for p in parcels if p.parcel_id == p_id)
-        parcel_to_update.status_id = 4 
+    # VROOM zwraca kolejność przystanków w "steps", więc iterujemy po niej i tworzymy RouteStop dla każdej paczki
+    for step in route_info["steps"]:
+        if step["type"] == "job":
+            stop = models.RouteStop(
+                route_id=new_route.route_id,
+                parcel_id=step["id"],
+                stop_order=step["arrival"], # VROOM podaje czas/kolejność
+                operation_type="DROP_OFF"
+            )
+            db.add(stop)
+            db.query(models.Parcel).filter(models.Parcel.parcel_id == step["id"]).update({"status_id": 4})
 
     db.commit()
-    
-    return {
-        "message": "Trasa zoptymalizowana i zapisana.",
-        "route_id": new_route.route_id
-    }
-
+    return {"message": "VRP Success", "route_id": new_route.route_id, "unassigned": vroom_data["summary"]["unassigned"]}
 
 
 
