@@ -2,8 +2,8 @@
   <div class="dispatcher-container">
     <v-tabs v-model="activeTab" color="#E5B338" class="mb-6">
       <v-tab value="planner" class="font-weight-bold">
-        <v-icon start>mdi-map-marker-path</v-icon>
-        Planowanie Trasy
+        <v-icon start>mdi-robot-outline</v-icon>
+        Automatyczne Planowanie
       </v-tab>
       <v-tab value="reports" class="font-weight-bold">
         <v-icon start>mdi-chart-bar</v-icon>
@@ -16,11 +16,11 @@
       <v-window-item value="planner">
         <v-row>
           <v-col cols="12" md="8">
-            <v-card class="rounded-xl elevation-6 overflow-hidden" border>
+            <v-card class="rounded-xl elevation-6 overflow-hidden mb-4" border>
               <v-toolbar color="white" flat>
                 <v-toolbar-title class="font-weight-bold">
                   <v-icon icon="mdi-package-variant-closed" color="#0B172A" class="mr-2"></v-icon>
-                  Paczki w magazynie (Do przypisania)
+                  Paczki Oczekujące ({{ unassignedParcels.length }})
                 </v-toolbar-title>
                 <v-spacer></v-spacer>
                 <v-btn icon @click="fetchData" :loading="loading">
@@ -29,11 +29,8 @@
               </v-toolbar>
 
               <v-data-table
-                v-model="selectedParcels"
                 :headers="headers"
                 :items="unassignedParcels"
-                show-select
-                item-value="parcel_id"
                 class="elevation-0"
                 no-data-text="Brak paczek oczekujących na trasę"
               >
@@ -42,58 +39,92 @@
                 </template>
               </v-data-table>
             </v-card>
+
+            <v-card v-if="generatedRoutes.length > 0" class="rounded-xl elevation-6 mt-4" border>
+              <v-toolbar color="white" flat>
+                <v-toolbar-title class="font-weight-bold text-success">
+                  <v-icon icon="mdi-check-circle" color="success" class="mr-2"></v-icon>
+                  Wygenerowane Trasy ({{ generatedRoutes.length }})
+                </v-toolbar-title>
+              </v-toolbar>
+              
+              <v-expansion-panels variant="accordion">
+                <v-expansion-panel v-for="(route, i) in generatedRoutes" :key="i">
+                  <v-expansion-panel-title>
+                    Trasa #{{ route.route_id }} — {{ route.courier_name }} ({{ route.vehicle_reg }})
+                    <template v-slot:actions>
+                      <v-chip color="#E5B338" class="font-weight-bold ml-4">
+                        {{ route.parcels_count }} paczek
+                      </v-chip>
+                    </template>
+                  </v-expansion-panel-title>
+                  <v-expansion-panel-text>
+                    <v-list density="compact">
+                      <v-list-item v-for="(parcel, j) in route.parcels" :key="j">
+                        <template v-slot:prepend>
+                          <v-avatar color="#0B172A" size="24" class="text-white mr-3">{{ j + 1 }}</v-avatar>
+                        </template>
+                        <v-list-item-title>{{ parcel.tracking_number }} — {{ parcel.recipient_city }}, {{ parcel.recipient_street }}</v-list-item-title>
+                      </v-list-item>
+                    </v-list>
+                  </v-expansion-panel-text>
+                </v-expansion-panel>
+              </v-expansion-panels>
+            </v-card>
+
           </v-col>
 
           <v-col cols="12" md="4">
             <v-card class="rounded-xl elevation-6 pa-4" color="#0B172A" theme="dark">
               <h3 class="text-h6 font-weight-bold text-white mb-4">
-                <v-icon icon="mdi-map-marker-path" color="#E5B338" class="mr-2"></v-icon>
-                Planowanie Trasy
+                <v-icon icon="mdi-engine-outline" color="#E5B338" class="mr-2"></v-icon>
+                Silnik Logistyczny (VROOM)
               </h3>
 
-              <v-alert v-if="selectedParcels.length === 0" type="info" variant="tonal" density="compact" class="mb-4">
-                Wybierz paczki z listy obok, aby zacząć planowanie.
+              <v-list bg-color="transparent" class="mb-4">
+                <v-list-item>
+                  <template v-slot:prepend>
+                    <v-icon icon="mdi-account-hard-hat" color="info"></v-icon>
+                  </template>
+                  <v-list-item-title>Dostępni Kurierzy</v-list-item-title>
+                  <template v-slot:append>
+                    <span class="font-weight-bold text-h6">{{ fleet.couriers.length }}</span>
+                  </template>
+                </v-list-item>
+                
+                <v-divider color="white" class="my-2"></v-divider>
+
+                <v-list-item>
+                  <template v-slot:prepend>
+                    <v-icon icon="mdi-truck-fast" color="info"></v-icon>
+                  </template>
+                  <v-list-item-title>Wolne Pojazdy</v-list-item-title>
+                  <template v-slot:append>
+                    <span class="font-weight-bold text-h6">{{ fleet.vehicles.length }}</span>
+                  </template>
+                </v-list-item>
+              </v-list>
+
+              <v-alert v-if="unassignedParcels.length === 0" type="info" variant="tonal" density="compact" class="mb-4">
+                Brak paczek do rozwiezienia.
               </v-alert>
 
-              <v-select
-                v-model="selectedCourier"
-                :items="fleet.couriers"
-                label="Wybierz Kuriera"
-                item-title="full_name"
-                item-value="user_id"
-                variant="outlined"
-                color="#E5B338"
-                class="mb-2"
-              ></v-select>
-
-              <v-select
-                v-model="selectedVehicle"
-                :items="fleet.vehicles"
-                label="Wybierz Pojazd"
-                item-title="display_name"
-                item-value="vehicle_id"
-                variant="outlined"
-                color="#E5B338"
-                class="mb-4"
-              ></v-select>
-
-              <v-divider class="mb-4" color="#E5B338"></v-divider>
-
-              <div class="d-flex justify-space-between mb-4">
-                <span>Wybrane paczki:</span>
-                <span class="font-weight-bold text-gold" style="color: #E5B338;">{{ selectedParcels.length }}</span>
-              </div>
+              <v-alert v-if="fleet.couriers.length === 0 || fleet.vehicles.length === 0" type="warning" variant="tonal" density="compact" class="mb-4">
+                Brakuje wolnych kurierów lub pojazdów do obsługi tras.
+              </v-alert>
 
               <v-btn
                 block
                 color="#E5B338"
                 size="large"
-                class="text-none font-weight-bold rounded-lg text-black"
-                :disabled="!isReadyToCreate"
-                :loading="creating"
-                @click="createNewRoute"
+                class="font-weight-bold rounded-lg text-black mt-4"
+                style="white-space: normal; height: auto; padding: 12px;"
+                :disabled="!isReadyToOptimize"
+                :loading="optimizing"
+                @click="autoOptimizeRoutes"
               >
-                UTWÓRZ TRASĘ I WYŚLIJ
+                URUCHOM AUTOPLANOWANIE
+                <v-icon right class="ml-2">mdi-auto-fix</v-icon>
               </v-btn>
             </v-card>
           </v-col>
@@ -106,7 +137,7 @@
 
     </v-window>
 
-    <v-snackbar v-model="snackbar.show" :color="snackbar.color" timeout="3000">
+    <v-snackbar v-model="snackbar.show" :color="snackbar.color" timeout="4000">
       {{ snackbar.text }}
     </v-snackbar>
   </div>
@@ -115,18 +146,14 @@
 <script setup>
 import { ref, onMounted, computed } from 'vue';
 import api from '../api/axios';
-
 import FinancialReports from './FinancialReports.vue'; 
 
-// Zmienna sterująca zakładkami
 const activeTab = ref('planner');
-
 const loading = ref(false);
-const creating = ref(false);
+const optimizing = ref(false);
+
 const unassignedParcels = ref([]);
-const selectedParcels = ref([]);
-const selectedCourier = ref(null);
-const selectedVehicle = ref(null);
+const generatedRoutes = ref([]);
 
 const fleet = ref({
   couriers: [],
@@ -143,8 +170,9 @@ const headers = [
   { title: 'Cena', key: 'calculated_price', align: 'end' },
 ];
 
-const isReadyToCreate = computed(() => {
-  return selectedParcels.value.length > 0 && selectedCourier.value && selectedVehicle.value;
+// Sprawdzamy, czy można odpalić algorytm
+const isReadyToOptimize = computed(() => {
+  return unassignedParcels.value.length > 0 && fleet.value.couriers.length > 0 && fleet.value.vehicles.length > 0;
 });
 
 const fetchData = async () => {
@@ -157,41 +185,37 @@ const fetchData = async () => {
     
     unassignedParcels.value = parcelsRes.data;
     
-    // Mapujemy dane kurierów i pojazdów dla lepszego wyświetlania
-    fleet.value.couriers = fleetRes.data.couriers.map(c => ({
-      ...c,
-      full_name: `${c.first_name} ${c.last_name}`
-    }));
-    fleet.value.vehicles = fleetRes.data.vehicles.map(v => ({
-      ...v,
-      display_name: `${v.registration_number} (${v.capacity_kg}kg)`
-    }));
+    fleet.value.couriers = fleetRes.data.couriers;
+    fleet.value.vehicles = fleetRes.data.vehicles;
   } catch (error) {
-    showSnackbar('Błąd podczas pobierania danych', 'error');
+    showSnackbar('Błąd podczas pobierania danych z serwera', 'error');
   } finally {
     loading.value = false;
   }
 };
 
-const createNewRoute = async () => {
-  creating.value = true;
+// Nowa funkcja do obsługi automatyzacji
+const autoOptimizeRoutes = async () => {
+  optimizing.value = true;
+  generatedRoutes.value = []; // Czyścimy stare wyniki
+  
   try {
-    await api.post('/dispatcher/routes', {
-      courier_id: selectedCourier.value,
-      vehicle_id: selectedVehicle.value,
-      parcel_ids: selectedParcels.value
-    });
+    // Strzelamy do nowego endpointu, który obsłuży logikę VROOM dla całej floty
+    const response = await api.post('/dispatcher/routes/auto');
     
-    showSnackbar('Trasa została pomyślnie utworzona!', 'success');
-    // Resetujemy wybór i odświeżamy listę
-    selectedParcels.value = [];
-    selectedCourier.value = null;
-    selectedVehicle.value = null;
-    await fetchData();
+    if (response.data.unassigned > 0) {
+      showSnackbar(`Sukces, ale uwaga: ${response.data.unassigned} paczek nie zmieściło się do aut.`, 'warning');
+    } else {
+      showSnackbar('VROOM pomyślnie wygenerował trasy dla wszystkich paczek!', 'success');
+    }
+
+    generatedRoutes.value = response.data.routes;
+    await fetchData(); // Odświeżamy magazyn (powinien być pusty, jeśli wszystko poszło ok)
+
   } catch (error) {
-    showSnackbar('Nie udało się utworzyć trasy', 'error');
+    showSnackbar(error.response?.data?.detail || 'Błąd podczas optymalizacji tras przez VROOM', 'error');
   } finally {
-    creating.value = false;
+    optimizing.value = false;
   }
 };
 
