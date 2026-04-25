@@ -21,6 +21,9 @@ class User(Base):
 
     user_id = Column(Integer, primary_key=True, index=True)
     role_id = Column(Integer, ForeignKey("roles.role_id"), nullable=False)
+
+    # --- NOWOŚĆ: Powiązanie z Magazynem ---
+    warehouse_id = Column(Integer, ForeignKey("warehouses.warehouse_id"), nullable=True) # VRP: Użytkownik może być przypisany do magazynu
     
     email = Column(String(255), unique=True, index=True, nullable=False)
     password_hash = Column(String(255), nullable=False)
@@ -32,6 +35,7 @@ class User(Base):
 
     # Relacja zwrotna
     role = relationship("Role", back_populates="users")
+    warehouse = relationship("Warehouse", back_populates="users") #VRP: Relacja do magazynu
 
 # ==========================================
 # WARSTWA 0: TABELE SŁOWNIKOWE (Niezależne)
@@ -49,6 +53,7 @@ class DimensionalTariff(Base):
     tariff_id = Column(Integer, primary_key=True, index=True)
     size_category = Column(String(10), unique=True, nullable=False) # np. 'A', 'B', 'C'
     max_weight_kg = Column(Float, nullable=False)
+    max_volume_m3 = Column(Float, nullable=False, server_default="0.1") # NOWE POLE DLA VROOM
     base_price = Column(Float, nullable=False)
 
 class Region(Base):
@@ -85,6 +90,7 @@ class Warehouse(Base):
     name = Column(String(100), nullable=False)
     type = Column(String(50), nullable=False) # np. 'HUB', 'DEPOT'
 
+    users = relationship("User", back_populates="warehouse") # Relacja powrotna
 
 # ==========================================
 # WARSTWA 2: SERCE SYSTEMU - PACZKI
@@ -160,6 +166,7 @@ class Vehicle(Base):
     vehicle_id = Column(Integer, primary_key=True, index=True)
     registration_number = Column(String(20), unique=True, nullable=False)
     capacity_kg = Column(Float, nullable=False)
+    capacity_m3 = Column(Float, nullable=True) # Dodatkowa informacja o pojemności, przydatna do VRP
     status = Column(String(50), default="ACTIVE") # ACTIVE, INACTIVE
 
 class Route(Base):
