@@ -54,9 +54,9 @@ def seed_db():
         if db.query(models.DimensionalTariff).count() == 0:
             print("INFO: Tabela taryf jest pusta. Dodaję cennik...")
             db.add_all([
-                models.DimensionalTariff(size_category="A", max_weight_kg=5.0, base_price=15.99),
-                models.DimensionalTariff(size_category="B", max_weight_kg=15.0, base_price=20.99),
-                models.DimensionalTariff(size_category="C", max_weight_kg=30.0, base_price=29.99)
+                models.DimensionalTariff(size_category="A", max_weight_kg=5.0, max_volume_m3=0.05, base_price=15.99),
+                models.DimensionalTariff(size_category="B", max_weight_kg=15.0, max_volume_m3=0.15, base_price=20.99),
+                models.DimensionalTariff(size_category="C", max_weight_kg=30.0, max_volume_m3=0.35, base_price=29.99)
             ])
             db.commit()
             print("SUCCESS: Taryfy dodane!")

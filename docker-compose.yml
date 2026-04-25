@@ -43,5 +43,19 @@ services:
       - backend
     restart: unless-stopped
 
+  vroom:
+    image: vroomvrp/vroom-docker:v1.13.0
+    container_name: royale_vroom
+    ports:
+      - "3000:3000"
+    environment:
+      - VROOM_ROUTER=osrm
+      # Używamy publicznego serwera OSRM do wyznaczania macierzy
+      - VROOM_ROUTING_SERVERS=car,router.project-osrm.org,80
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+
 volumes:
   postgres_data:
