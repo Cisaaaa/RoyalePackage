@@ -22,10 +22,10 @@
         <v-card max-width="600" class="mx-auto rounded-xl pa-2 mb-16" color="#1E293B" elevation="12">
           <v-row no-gutters align="center">
             <v-col cols="8" sm="9">
-              <v-text-field placeholder="RP1234567PL" variant="plain" class="px-4 text-white" hide-details prepend-inner-icon="mdi-magnify"></v-text-field>
+              <v-text-field v-model="trackingNumber" placeholder="RP1234567PL" variant="plain" class="px-4 text-white" hide-details prepend-inner-icon="mdi-magnify" @keyup.enter="goToTracking"></v-text-field>
             </v-col>
             <v-col cols="4" sm="3">
-              <v-btn block color="#E5B338" height="52" class="rounded-lg text-black font-weight-bold">ŚLEDŹ</v-btn>
+              <v-btn block color="#E5B338" height="52" class="rounded-lg text-black font-weight-bold" @click="goToTracking">ŚLEDŹ</v-btn>
             </v-col>
           </v-row>
         </v-card>
@@ -46,3 +46,19 @@
 .text-gold { color: #E5B338 !important; }
 .lh-1 { line-height: 1; }
 </style>
+
+<script setup lang="ts">
+import { ref } from 'vue';
+import { useRouter } from 'vue-router';
+
+const router = useRouter();
+const trackingNumber = ref('');
+
+const goToTracking = () => {
+  if (trackingNumber.value.trim()) {
+    router.push(`/tracking/${trackingNumber.value.trim()}`);
+  } else {
+    router.push('/tracking');
+  }
+};
+</script>

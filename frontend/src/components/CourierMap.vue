@@ -47,23 +47,49 @@
               PROBLEM
             </v-btn>
             
+            <!-- STARY PRZYCISK: Dla kurierów lub pierwszego startu -->
             <v-btn 
-              v-if="stop.status !== 'COMPLETED'"
+              v-if="stop.status !== 'COMPLETED' && stop.stop_order === 0"
               color="#E5B338" class="text-black font-weight-bold" prepend-icon="mdi-check-circle-outline"
               @click="markAsDelivered(index)"
             >
               {{ stop.operation_type === 'WAREHOUSE_TRANSFER' ? 'START TRASY' : 'DORĘCZONO' }}
             </v-btn>
-            
-            <v-chip v-else color="success" variant="flat" class="font-weight-bold">
-              <v-icon start>mdi-check-all</v-icon> 
-              {{ stop.operation_type === 'WAREHOUSE_TRANSFER' ? 'W TRASIE' : 'DORĘCZONA' }}
-            </v-chip>
+
+            <v-btn 
+              v-else-if="stop.status !== 'COMPLETED' && stop.operation_type === 'DROP_OFF'"
+              color="#E5B338" class="text-black font-weight-bold" prepend-icon="mdi-check-circle-outline"
+              @click="markAsDelivered(index)"
+            >
+              DORĘCZONO
+            </v-btn>
+
+            <!-- NOWY PRZYCISK: Dla końca trasy Line-Haul -->
+            <v-btn 
+              v-else-if="stop.status !== 'COMPLETED' && stop.operation_type === 'WAREHOUSE_TRANSFER' && stop.stop_order > 0"
+              color="success" class="text-white font-weight-bold" prepend-icon="mdi-warehouse"
+              @click="markAsDelivered(index)"
+            >
+              DOJECHAŁEM DO HUB-u
+            </v-btn>
           </div>
 
         </div>
       </v-list-item>
     </v-list>
+    <!-- NOWY GUZIK ZAKOŃCZENIA TRASY -->
+    <v-btn
+      v-if="allStopsCompleted"
+      block
+      color="success"
+      size="x-large"
+      class="mt-6 font-weight-bold rounded-xl text-white"
+      prepend-icon="mdi-flag-checkered"
+      @click="finishRoute"
+      elevation="4"
+    >
+      ZAKOŃCZ TRASĘ I WRÓĆ DO BAZY
+    </v-btn>
   </v-card>
 
   <v-card v-else class="custom-card pa-10 text-center" elevation="10">
@@ -78,7 +104,7 @@
 
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { ref, onMounted, computed } from 'vue';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 import api from '../api/axios';
@@ -87,6 +113,11 @@ const routeStops = ref<any[]>([]);
 let map: L.Map | null = null; 
 let layerGroup: L.LayerGroup | null = null; 
 let currentStopCount = 0; // Pamiętamy ilość paczek do Long Pollingu
+
+// eaktywnie sprawdzamy, czy cała trasa jest wykonana
+const allStopsCompleted = computed(() => {
+  return routeStops.value.length > 0 && routeStops.value.every(s => s.status === 'COMPLETED');
+});
 
 onMounted(async () => {
   try {
@@ -98,14 +129,49 @@ onMounted(async () => {
 
     routeStops.value = fetchedStops;
     initMap();
-    
-    // Startujemy nasłuchiwanie na nowe paczki
-    startLongPolling();
+
+    // --- NOWY KOD WEBSOCKET Z AUTO-RECONNECTEM ---
+    const connectWebSocket = () => {
+      const token = localStorage.getItem('access_token');
+      if (!token) return;
+
+      const ws = new WebSocket(`ws://localhost:8000/api/v1/courier/ws/${token}`);
+      
+      ws.onopen = () => console.log("Połączono z bazą przez WebSocket!");
+      
+      ws.onmessage = async (event) => {
+          if (event.data === "ROUTE_UPDATED") {
+              console.log("Dyspozytor przypisał nową trasę! Odświeżam mapę...");
+              const freshRouteResponse = await api.get('/courier/route');
+              let newStops = freshRouteResponse.data.map((stop: any) => {
+                  const existingStop = routeStops.value.find(s => s.stop_id === stop.stop_id);
+                  return { ...stop, status: existingStop ? existingStop.status : 'PLANNED' };
+              });
+              newStops = await optimizeRoute(newStops);
+              routeStops.value = newStops;
+              renderRouteAndMarkers();
+          }
+      };
+
+      ws.onclose = () => {
+          console.log("Połączenie WebSocket zamknięte. Próba wznowienia za 3 sekundy...");
+          // Auto-reconnect: próbujemy połączyć się ponownie po 3 sekundach
+          setTimeout(connectWebSocket, 3000);
+      };
+      
+      ws.onerror = (error) => {
+          console.error("Błąd połączenia WebSocket:", error);
+      };
+    };
+
+    // Uruchamiamy połączenie
+    connectWebSocket();
 
   } catch (error) {
     console.error("Błąd pobierania/optymalizacji trasy:", error);
   }
 });
+  
 
 // Funkcja pomocnicza: Wyciągnięta logika OSRM, żeby użyć jej też przy Long Pollingu
 const optimizeRoute = async (stops: any[]) => {
@@ -215,65 +281,38 @@ const markAsDelivered = async (index: number) => {
   const stop = routeStops.value[index];
   
   try {
-    // 1. Zabezpieczenie dla pierwszego przystanku (Start z magazynu - nie ma ID paczki)
     if (stop.operation_type === 'WAREHOUSE_TRANSFER') {
+      await api.put(`/courier/stops/${stop.stop_id}/complete`); 
       routeStops.value[index].status = 'COMPLETED';
       renderRouteAndMarkers();
       return;
     }
 
-    // 2. Strzał do Twojego backendu! (Tego brakowało u Kacpra)
     await api.put(`/courier/parcels/${stop.parcel_id}/deliver`);
-
-    // 3. Po udanym zapisie w bazie, aktualizujemy wygląd na ekranie kuriera
     routeStops.value[index].status = 'COMPLETED';
     renderRouteAndMarkers(); 
 
-    // 4. Magia czyszczenia ekranu: Sprawdzamy, czy wszystkie paczki mają już status 'COMPLETED'
-    const allCompleted = routeStops.value.every(s => s.status === 'COMPLETED');
-    if (allCompleted) {
-      // Jeśli tak, czyścimy tablicę tras. Vue automatycznie schowa mapę i pokaże nowy komunikat.
-      routeStops.value = [];
-    }
+    // nie czyścimy juz automatycznie.
 
   } catch (error) {
     console.error("Błąd zapisu w bazie danych:", error);
-    alert("Wystąpił błąd podczas komunikacji z serwerem. Upewnij się, że masz połączenie z internetem.");
+    alert("Wystąpił błąd podczas komunikacji z serwerem.");
   }
 };
 
-// --- LONG POLLING ---
-const startLongPolling = async () => {
-  try {
-    const response = await api.get(`/courier/long-poll?last_known_count=${currentStopCount}`);
-    
-    if (response.data.updated) {
-      console.log("Dyspozytor dodał nową paczkę!");
-      currentStopCount = response.data.new_count;
-      
-      const freshRouteResponse = await api.get('/courier/route');
-      
-      // Zabezpieczenie przed utratą zrobionego postępu (statusów COMPLETED)
-      let newStops = freshRouteResponse.data.map((stop: any) => {
-        const existingStop = routeStops.value.find(s => s.stop_id === stop.stop_id);
-        return {
-          ...stop,
-          status: existingStop ? existingStop.status : 'PLANNED'
-        };
-      });
-      
-      newStops = await optimizeRoute(newStops);
-      routeStops.value = newStops;
-      
-      renderRouteAndMarkers();
+// Funkcja do fizycznego zamknięcia trasy guzikiem
+const finishRoute = async () => {
+    try {
+        await api.put('/courier/routes/complete');
+        // czysczenie ekranu kuriera
+        routeStops.value = [];
+        alert("Świetna robota! Trasa zakończona, wracaj do bazy.");
+    } catch (error) {
+        console.error("Błąd zamykania trasy:", error);
     }
-  } catch (error) {
-    console.error("Błąd Long Pollingu. Ponawiam za 5 sekund...", error);
-    await new Promise(resolve => setTimeout(resolve, 5000)); 
-  } finally {
-    startLongPolling();
-  }
 };
+
+
 </script>
 
 <style scoped>

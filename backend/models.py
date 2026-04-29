@@ -166,9 +166,13 @@ class Vehicle(Base):
     vehicle_id = Column(Integer, primary_key=True, index=True)
     registration_number = Column(String(20), unique=True, nullable=False)
     capacity_kg = Column(Float, nullable=False)
-    capacity_m3 = Column(Float, nullable=True) # Dodatkowa informacja o pojemności, przydatna do VRP
-    status = Column(String(50), default="ACTIVE") # ACTIVE, INACTIVE
+    capacity_m3 = Column(Float, nullable=True)
+    status = Column(String(50), default="ACTIVE") 
+    vehicle_type = Column(String(50), nullable=False, server_default='VAN')
 
+    # --- NOWA KOLUMNA: Pojazd należy do konkretnego HUBu ---
+    warehouse_id = Column(Integer, ForeignKey("warehouses.warehouse_id"), nullable=True)
+    
 class Route(Base):
     __tablename__ = "routes"
     
@@ -193,13 +197,15 @@ class RouteStop(Base):
     
     stop_id = Column(Integer, primary_key=True, index=True)
     route_id = Column(Integer, ForeignKey("routes.route_id"), nullable=False)
-    parcel_id = Column(Integer, ForeignKey("parcels.parcel_id"), nullable=True) # Nullable, bo przystankiem może być magazyn
+    parcel_id = Column(Integer, ForeignKey("parcels.parcel_id"), nullable=True) 
     warehouse_id = Column(Integer, ForeignKey("warehouses.warehouse_id"), nullable=True)
     
-    stop_order = Column(Integer, nullable=False) # Kolejność (1, 2, 3...) optymalizowana przez OSRM
-    operation_type = Column(String(50), nullable=False) # 'PICKUP', 'DROP_OFF', 'WAREHOUSE_TRANSFER'
-    status = Column(String(50), default="PLANNED") # PLANNED, SUCCESS, FAILED
+    stop_order = Column(Integer, nullable=False) 
+    operation_type = Column(String(50), nullable=False) 
+    status = Column(String(50), default="PLANNED") 
     actual_arrival = Column(DateTime(timezone=True), nullable=True)
+    
+    # --- NOWE POLE POD TRACKING (ETA) ---
+    estimated_arrival = Column(DateTime(timezone=True), nullable=True)
 
-    # Relacja zwrotna
     route = relationship("Route", back_populates="stops")

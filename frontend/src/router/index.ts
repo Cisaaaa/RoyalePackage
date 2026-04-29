@@ -3,6 +3,7 @@ import { createRouter, createWebHistory } from 'vue-router';
 import DashboardView from '../components/DashboardView.vue';
 import LoginForm from '../components/LoginForm.vue';
 import HomeView from '../components/HomeView.vue'; 
+import TrackingView from '../components/TrackingView.vue';
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -22,7 +23,17 @@ const router = createRouter({
       name: 'dashboard', 
       component: DashboardView,
       meta: { requiresAuth: true } // Oznaczamy, że tu trzeba mieć bilet VIP!
-    }
+    },
+    {
+      path: '/tracking',
+      name: 'tracking',
+      component: TrackingView
+    },
+    {
+      path: '/tracking/:number',
+      name: 'tracking-details',
+      component: TrackingView
+    },
   ]
 });
 
