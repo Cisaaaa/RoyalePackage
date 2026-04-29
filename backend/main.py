@@ -1,6 +1,5 @@
 import os
-from fastapi import FastAPI
-from fastapi import Depends, HTTPException, status
+from fastapi import FastAPI, Depends, HTTPException, status, WebSocket, WebSocketDisconnect, BackgroundTasks
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 import schemas
@@ -9,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text, func
 import random
 import asyncio
+from datetime import datetime, timezone
 
 import requests
 
@@ -28,18 +28,15 @@ def seed_db():
     try:
         # 1. ROLE UŻYTKOWNIKÓW
         if db.query(models.Role).count() == 0:
-            print("INFO: Tabela ról jest pusta. Dodaję role...")
             db.add_all([
                 models.Role(role_name="Klient"),
                 models.Role(role_name="Kurier"),
                 models.Role(role_name="Dyspozytor")
             ])
             db.commit()
-            print("SUCCESS: Role dodane!")
 
         # 2. STATUSY PACZEK
         if db.query(models.Status).count() == 0:
-            print("INFO: Tabela statusów jest pusta. Dodaję statusy...")
             db.add_all([
                 models.Status(status_name="Zarejestrowana"),
                 models.Status(status_name="W magazynie nadawczym"),
@@ -48,50 +45,51 @@ def seed_db():
                 models.Status(status_name="Dostarczona")
             ])
             db.commit()
-            print("SUCCESS: Statusy dodane!")
 
         # 3. TARYFY / GABARYTY
         if db.query(models.DimensionalTariff).count() == 0:
-            print("INFO: Tabela taryf jest pusta. Dodaję cennik...")
             db.add_all([
                 models.DimensionalTariff(size_category="A", max_weight_kg=5.0, max_volume_m3=0.05, base_price=15.99),
                 models.DimensionalTariff(size_category="B", max_weight_kg=15.0, max_volume_m3=0.15, base_price=20.99),
                 models.DimensionalTariff(size_category="C", max_weight_kg=30.0, max_volume_m3=0.35, base_price=29.99)
             ])
             db.commit()
-            print("SUCCESS: Taryfy dodane!")
 
-        # 4. DOMYŚLNY MAGAZYN (Wymagany do logistyki)
+        # 4. REGIONALIZACJA I MAGAZYNY (HUB & SPOKE)
         if db.query(models.Warehouse).count() == 0:
-            print("INFO: Brak magazynów. Tworzę główny HUB...")
+            # Tworzymy Regiony
+            reg_waw = models.Region(region_name="Mazowieckie")
+            reg_krk = models.Region(region_name="Małopolskie")
+            db.add_all([reg_waw, reg_krk])
+            db.commit()
+
+            # Adresy Magazynów z GPS (Wymagane przez VROOM)
+            addr_waw = models.Address(street="Logistyczna", building_number="1", city="Warszawa", postal_code="00-001", geom="SRID=4326;POINT(21.0122 52.2297)")
+            addr_krk = models.Address(street="Wielicka", building_number="250", city="Kraków", postal_code="30-001", geom="SRID=4326;POINT(19.9449 50.0647)")
+            db.add_all([addr_waw, addr_krk])
+            db.commit()
+
+            # Tworzymy Huby
+            hub_waw = models.Warehouse(address_id=addr_waw.address_id, region_id=reg_waw.region_id, name="HUB Warszawa", type="HUB")
+            hub_krk = models.Warehouse(address_id=addr_krk.address_id, region_id=reg_krk.region_id, name="HUB Kraków", type="HUB")
+            db.add_all([hub_waw, hub_krk])
+            db.commit()
             
-            # Najpierw tworzymy Region
-            region = models.Region(region_name="Mazowieckie")
-            db.add(region)
+            # --- DODANIE DYSPOZYTORÓW DO HUBÓW ---
+            # Dzięki temu nie musisz ich zakładać ręcznie. Hasło to: "password123"
+            import security
+            hashed_pw = security.hash_password("password123")
+            
+            disp_waw = models.User(email="waw@royale.pl", password_hash=hashed_pw, first_name="Jan", last_name="Warszawski", role_id=3, warehouse_id=hub_waw.warehouse_id)
+            disp_krk = models.User(email="krk@royale.pl", password_hash=hashed_pw, first_name="Anna", last_name="Krakowska", role_id=3, warehouse_id=hub_krk.warehouse_id)
+            
+            # Oraz testowy kurier i pojazd
+            courier = models.User(email="kurier@royale.pl", password_hash=hashed_pw, first_name="Szybki", last_name="Bill", role_id=2, warehouse_id=hub_waw.warehouse_id)
+            vehicle = models.Vehicle(registration_number="WA 12345", capacity_kg=1000.0, capacity_m3=10.0, status="ACTIVE")
+            
+            db.add_all([disp_waw, disp_krk, courier, vehicle])
             db.commit()
-            db.refresh(region)
-
-            # Potem tworzymy fizyczny adres dla Magazynu (bez współrzędnych na razie)
-            address = models.Address(
-                street="ul. Logistyczna",
-                building_number="1",
-                city="Warszawa",
-                postal_code="00-001"
-            )
-            db.add(address)
-            db.commit()
-            db.refresh(address)
-
-            # Na końcu sam Magazyn, przypinając do niego ID adresu i regionu
-            warehouse = models.Warehouse(
-                address_id=address.address_id,
-                region_id=region.region_id,
-                name="HUB Centralny Warszawa",
-                type="HUB"
-            )
-            db.add(warehouse)
-            db.commit()
-            print("SUCCESS: Główny HUB dodany!")
+            print("SUCCESS: Struktura Regionalna (Hub & Spoke) została wgrana!")
 
     except Exception as e:
         print(f"ERROR: Błąd podczas seedingu: {e}")
@@ -148,6 +146,29 @@ app = FastAPI(
     description="API dla systemu logistycznego",
     version="1.0.0"
 )
+
+# WEBSOCKET MANAGER
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: dict[int, WebSocket] = {}
+
+    async def connect(self, websocket: WebSocket, courier_id: int):
+        await websocket.accept()
+        self.active_connections[courier_id] = websocket
+        print(f"INFO: Kurier {courier_id} połączył się przez WebSocket.")
+
+    def disconnect(self, courier_id: int, websocket: WebSocket):
+        # Usuń tylko wtedy, gdy to DOKŁADNIE to samo połączenie
+        if courier_id in self.active_connections and self.active_connections[courier_id] == websocket:
+            del self.active_connections[courier_id]
+            print(f"INFO: Kurier {courier_id} rozłączony.")
+
+    async def send_personal_message(self, message: str, courier_id: int):
+        websocket = self.active_connections.get(courier_id)
+        if websocket:
+            await websocket.send_text(message)
+
+manager = ConnectionManager()
 
 # Dodajemy obsługę CORS, żeby frontend (Vue.js) mógł z nami gadać
 app.add_middleware(
@@ -670,9 +691,32 @@ def create_route(
     db.commit()
     return {"message": "VRP Success", "route_id": new_route.route_id, "unassigned": vroom_data["summary"]["unassigned"]}
 
+# OZNACZANIE STARTU TRASY (Wyjazd z HUBu)
+@app.put("/api/v1/courier/stops/{stop_id}/complete", summary="Oznacz przystanek magazynowy jako ukończony")
+def complete_route_stop(
+    stop_id: int,
+    db: Session = Depends(get_db),
+    current_user_email: str = Depends(security.get_current_user_email)
+):
+    user = db.query(models.User).filter(models.User.email == current_user_email).first()
+    if not user or user.role_id != 2:
+        raise HTTPException(status_code=403, detail="Brak uprawnień.")
 
+    stop = db.query(models.RouteStop).filter(models.RouteStop.stop_id == stop_id).first()
+    if not stop:
+        raise HTTPException(status_code=404, detail="Nie znaleziono przystanku.")
 
+    # 1. Zmieniamy status przystanku magazynowego na ukończony
+    stop.status = "COMPLETED"
+    stop.actual_arrival = func.now()
+    
+    # 2. Skoro kurier wyjechał z magazynu, zmieniamy status CAŁEJ TRASY na "W trakcie"
+    route = db.query(models.Route).filter(models.Route.route_id == stop.route_id).first()
+    if route and route.status == "PLANNED":
+        route.status = "IN_PROGRESS"
 
+    db.commit()
+    return {"message": "Wyjazd z magazynu zarejestrowany. Trasa rozpoczęta!"}
 
 # OBSŁUGA KURIERA - DORĘCZENIE PACZKI
 @app.put("/api/v1/courier/parcels/{parcel_id}/deliver", summary="Oznacz paczkę jako doręczoną")
@@ -699,80 +743,70 @@ def mark_parcel_delivered(
     
     if stop:
         stop.status = "COMPLETED"
-        
-        # TO JEST KLUCZ: Wymuszamy synchronizację pamięci Pythona z bazą danych
         db.flush() 
-        
-        # --- AUTOMATYCZNE ZAMYKANIE TRASY ---
-        # Teraz baza wie, że ten konkretny stop jest COMPLETED, więc go nie policzy
-        remaining_stops = db.query(models.RouteStop).filter(
-            models.RouteStop.route_id == stop.route_id,
-            models.RouteStop.status.in_(["PLANNED", "IN_PROGRESS"])
-        ).count()
-        
-        if remaining_stops == 0:
-            # Jeśli to była ostatnia paczka, zamykamy całą trasę!
-            route = db.query(models.Route).filter(models.Route.route_id == stop.route_id).first()
-            if route:
-                route.status = "COMPLETED"
-        # --------------------------------------------
 
-    # Zapisujemy wszystko ostatecznie w bazie (paczka, stop i trasa)
+    # Zapisujemy zmianę statusu paczki i przystanku
     db.commit()
 
-    return {"message": "Paczka doręczona pomyślnie. Jeśli to była ostatnia, trasa została zamknięta."}
+    return {"message": "Paczka doręczona pomyślnie."}
 
-
-
-
-# LONG POLLING - AKTUALIZACJA TRASY NA ŻYWO
-
-@app.get("/api/v1/courier/long-poll", summary="Long Polling dla trasy kuriera")
-async def courier_long_poll(
-    last_known_count: int, # Frontend mówi nam, ile paczek aktualnie widzi
+# RĘCZNE ZAKOŃCZENIE TRASY PRZEZ KURIERA
+@app.put("/api/v1/courier/routes/complete", summary="Zakończ aktywną trasę i wróć do bazy")
+def complete_active_route(
     db: Session = Depends(get_db),
     current_user_email: str = Depends(security.get_current_user_email)
 ):
     user = db.query(models.User).filter(models.User.email == current_user_email).first()
     if not user or user.role_id != 2:
-        raise HTTPException(status_code=403, detail="Brak uprawnień")
+        raise HTTPException(status_code=403, detail="Brak uprawnień.")
 
+    # Szukamy trasy tego kuriera, która jest "W trakcie"
     route = db.query(models.Route).filter(
         models.Route.courier_id == user.user_id,
-        models.Route.status.in_(["PLANNED", "IN_PROGRESS"])
+        models.Route.status == "IN_PROGRESS"
     ).first()
-
+    
     if not route:
-        return {"updated": False}
-
-    # Pętla Long Pollingu: Czekamy maksymalnie 20 sekund
-    for _ in range(20):
-        # BARDZO WAŻNE: Wymuszamy na bazie odświeżenie transakcji. 
-        # Bez tego SQLAlchemy nie zobaczyłoby paczek dodanych w DBeaverze!
-        db.commit() 
+        raise HTTPException(status_code=404, detail="Brak aktywnej trasy do zakończenia.")
         
-        # Sprawdzamy, ile aktualnie przypisanych jest paczek do tej trasy
-        current_count = db.query(models.RouteStop).filter(
-            models.RouteStop.route_id == route.route_id,
-            models.RouteStop.status == "PLANNED"
-        ).count()
+    route.status = "COMPLETED"
+    db.commit()
+    
+    return {"message": "Trasa oficjalnie zakończona!"}
 
-        # Jeśli ilość w bazie jest większa niż to, co widzi kurier -> ALARM! Nowa paczka!
-        if current_count > last_known_count:
-            return {"updated": True, "new_count": current_count}
+@app.websocket("/api/v1/courier/ws/{token}")
+async def courier_websocket(websocket: WebSocket, token: str, db: Session = Depends(get_db)):
+    # 1. AKCEPTUJEMY POŁĄCZENIE OD RAZU (To zapobiega błędom "Finished" w przeglądarce)
+    await websocket.accept()
+    
+    try:
+        # 2. Ręczna weryfikacja tokena JWT
+        payload = jwt.decode(token, security.SECRET_KEY, algorithms=[security.ALGORITHM])
+        email = payload.get("sub")
+        user = db.query(models.User).filter(models.User.email == email).first()
         
-        # Usypiamy pętlę na 1 sekundę i sprawdzamy znowu
-        await asyncio.sleep(1)
-
-    # Jeśli przez 20 sekund nic się nie wydarzyło, zamykamy połączenie (Frontend otworzy nowe)
-    return {"updated": False}
-
-
-
-
+        if not user or user.role_id != 2: # Wpuszczamy tylko Kuriera
+            await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+            return
+            
+        # 3. Zapisujemy aktywną "słuchawkę" w menedżerze
+        manager.active_connections[user.user_id] = websocket
+        print(f"INFO: Kurier {user.user_id} połączył się przez WebSocket.")
+        
+        # 4. Nieskończona pętla utrzymująca otwarty tunel
+        try:
+            while True:
+                data = await websocket.receive_text()
+        except WebSocketDisconnect:
+            manager.disconnect(user.user_id, websocket)
+            
+    except Exception as e:
+        print(f"WS ERROR: {e}")
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
 
 @app.post("/api/v1/dispatcher/routes/auto", summary="Automatyczna optymalizacja floty przez VROOM")
 def auto_optimize_fleet(
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user_email: str = Depends(security.get_current_user_email)
 ):
@@ -896,6 +930,17 @@ def auto_optimize_fleet(
         db.add(new_route)
         db.flush()
 
+        # Zapisujemy HUB jako punkt startowy (Przystanek #0)
+        now = datetime.now(timezone.utc)
+        db.add(models.RouteStop(
+            route_id=new_route.route_id,
+            warehouse_id=warehouse.warehouse_id, # Pobiera ID magazynu dyspozytora
+            stop_order=0,
+            operation_type="WAREHOUSE_TRANSFER",
+            status="PLANNED",
+            estimated_arrival=now # ETA dla startu to "teraz"
+        ))
+
         route_parcels = []
         for order, step in enumerate(job_steps, start=1):
             parcel_id = step["id"]
@@ -927,17 +972,15 @@ def auto_optimize_fleet(
             "parcels": route_parcels
         })
 
+        # Zlecamy serwerowi, aby wysłał wiadomość w tle, nie blokując bazy danych
+        background_tasks.add_task(manager.send_personal_message, "ROUTE_UPDATED", courier.user_id)
+
     db.commit()
     return {
         "message": "Optymalizacja zakończona",
         "routes": created_routes,
         "unassigned": len(result.get("unassigned", []))
     }
-
-
-
-
-
 
 @app.get("/api/v1/dispatcher/reports", response_model=list[schemas.RouteReportResponse], summary="Pobierz raporty finansowe tras")
 def get_route_reports(
