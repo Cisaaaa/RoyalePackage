@@ -47,18 +47,31 @@
               PROBLEM
             </v-btn>
             
+            <!-- STARY PRZYCISK: Dla kurierów lub pierwszego startu -->
             <v-btn 
-              v-if="stop.status !== 'COMPLETED'"
+              v-if="stop.status !== 'COMPLETED' && stop.stop_order === 0"
               color="#E5B338" class="text-black font-weight-bold" prepend-icon="mdi-check-circle-outline"
               @click="markAsDelivered(index)"
             >
               {{ stop.operation_type === 'WAREHOUSE_TRANSFER' ? 'START TRASY' : 'DORĘCZONO' }}
             </v-btn>
-            
-            <v-chip v-else color="success" variant="flat" class="font-weight-bold">
-              <v-icon start>mdi-check-all</v-icon> 
-              {{ stop.operation_type === 'WAREHOUSE_TRANSFER' ? 'W TRASIE' : 'DORĘCZONA' }}
-            </v-chip>
+
+            <v-btn 
+              v-else-if="stop.status !== 'COMPLETED' && stop.operation_type === 'DROP_OFF'"
+              color="#E5B338" class="text-black font-weight-bold" prepend-icon="mdi-check-circle-outline"
+              @click="markAsDelivered(index)"
+            >
+              DORĘCZONO
+            </v-btn>
+
+            <!-- NOWY PRZYCISK: Dla końca trasy Line-Haul -->
+            <v-btn 
+              v-else-if="stop.status !== 'COMPLETED' && stop.operation_type === 'WAREHOUSE_TRANSFER' && stop.stop_order > 0"
+              color="success" class="text-white font-weight-bold" prepend-icon="mdi-warehouse"
+              @click="markAsDelivered(index)"
+            >
+              DOJECHAŁEM DO HUB-u
+            </v-btn>
           </div>
 
         </div>

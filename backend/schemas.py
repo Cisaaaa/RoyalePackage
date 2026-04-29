@@ -125,6 +125,7 @@ class CourierStopResponse(BaseModel):
     city: str
     lat: float | None
     lon: float | None
+    stop_order: int
 
     class Config:
         from_attributes = True

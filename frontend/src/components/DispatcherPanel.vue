@@ -2,8 +2,12 @@
   <div class="dispatcher-container">
     <v-tabs v-model="activeTab" color="#E5B338" class="mb-6">
       <v-tab value="planner" class="font-weight-bold">
-        <v-icon start>mdi-robot-outline</v-icon>
-        Automatyczne Planowanie
+        <v-icon start>mdi-car-hatchback</v-icon>
+        Kurierzy Lokalni (VROOM)
+      </v-tab>
+      <v-tab value="linehaul" class="font-weight-bold">
+        <v-icon start>mdi-truck-cargo-container</v-icon>
+        Wysyłka TIR (Line-Haul)
       </v-tab>
       <v-tab value="reports" class="font-weight-bold">
         <v-icon start>mdi-chart-bar</v-icon>
@@ -13,114 +17,90 @@
 
     <v-window v-model="activeTab">
       
+      <!-- ========================================== -->
+      <!-- ZAKŁADKA 1: VROOM (OSTATNIA MILA / BUSY)   -->
+      <!-- ========================================== -->
       <v-window-item value="planner">
         <v-row>
           <v-col cols="12" md="8">
-            <v-card class="rounded-xl elevation-6 overflow-hidden mb-4" border>
-              <v-toolbar color="white" flat>
-                <v-toolbar-title class="font-weight-bold">
-                  <v-icon icon="mdi-package-variant-closed" color="#0B172A" class="mr-2"></v-icon>
-                  Paczki Oczekujące ({{ unassignedParcels.length }})
+            <v-card class="rounded-xl elevation-6 overflow-hidden mb-4" border style="border-color: rgba(255,255,255,0.1) !important; background-color: #0F172A;">
+              <v-toolbar color="transparent" flat class="border-b border-opacity-25">
+                <v-toolbar-title class="font-weight-bold text-white">
+                  <v-icon icon="mdi-home-city" color="#E5B338" class="mr-2"></v-icon>
+                  Paczki Lokalne ({{ localParcels.length }})
                 </v-toolbar-title>
                 <v-spacer></v-spacer>
-                <v-btn icon @click="fetchData" :loading="loading">
+                <v-btn icon color="#E5B338" @click="fetchData" :loading="loading">
                   <v-icon>mdi-refresh</v-icon>
                 </v-btn>
               </v-toolbar>
 
               <v-data-table
                 :headers="headers"
-                :items="unassignedParcels"
-                class="elevation-0"
-                no-data-text="Brak paczek oczekujących na trasę"
+                :items="localParcels"
+                class="bg-transparent text-white"
+                no-data-text="Brak paczek do doręczenia w Twoim regionie"
               >
                 <template v-slot:item.calculated_price="{ item }">
-                  <span class="font-weight-bold">{{ item.calculated_price.toFixed(2) }} zł</span>
+                  <span class="font-weight-bold text-gold">{{ item.calculated_price.toFixed(2) }} zł</span>
                 </template>
               </v-data-table>
             </v-card>
 
-            <v-card v-if="generatedRoutes.length > 0" class="rounded-xl elevation-6 mt-4" border>
-              <v-toolbar color="white" flat>
+            <!-- Widok wygenerowanych tras lokalnych -->
+            <v-card v-if="generatedRoutes.length > 0" class="rounded-xl elevation-6 mt-4 pa-2" color="#1E293B" border>
+               <v-toolbar color="transparent" flat>
                 <v-toolbar-title class="font-weight-bold text-success">
                   <v-icon icon="mdi-check-circle" color="success" class="mr-2"></v-icon>
-                  Wygenerowane Trasy ({{ generatedRoutes.length }})
+                  Wygenerowane Trasy Lokalne ({{ generatedRoutes.length }})
                 </v-toolbar-title>
               </v-toolbar>
-              
-              <v-expansion-panels variant="accordion">
-                <v-expansion-panel v-for="(route, i) in generatedRoutes" :key="i">
+              <v-expansion-panels variant="accordion" class="bg-transparent">
+                <v-expansion-panel v-for="(route, i) in generatedRoutes" :key="i" class="bg-transparent text-white">
                   <v-expansion-panel-title>
                     Trasa #{{ route.route_id }} — {{ route.courier_name }} ({{ route.vehicle_reg }})
                     <template v-slot:actions>
-                      <v-chip color="#E5B338" class="font-weight-bold ml-4">
+                      <v-chip color="#E5B338" class="font-weight-bold ml-4 text-black">
                         {{ route.parcels_count }} paczek
                       </v-chip>
                     </template>
                   </v-expansion-panel-title>
                   <v-expansion-panel-text>
-                    <v-list density="compact">
+                    <v-list density="compact" class="bg-transparent">
                       <v-list-item v-for="(parcel, j) in route.parcels" :key="j">
                         <template v-slot:prepend>
-                          <v-avatar color="#0B172A" size="24" class="text-white mr-3">{{ j + 1 }}</v-avatar>
+                          <v-avatar color="#E5B338" size="24" class="text-black font-weight-bold mr-3">{{ j + 1 }}</v-avatar>
                         </template>
-                        <v-list-item-title>{{ parcel.tracking_number }} — {{ parcel.recipient_city }}, {{ parcel.recipient_street }}</v-list-item-title>
+                        <v-list-item-title class="text-white">{{ parcel.tracking_number }} — {{ parcel.recipient_city }}, {{ parcel.recipient_street }}</v-list-item-title>
                       </v-list-item>
                     </v-list>
                   </v-expansion-panel-text>
                 </v-expansion-panel>
               </v-expansion-panels>
             </v-card>
-
           </v-col>
 
           <v-col cols="12" md="4">
-            <v-card class="rounded-xl elevation-6 pa-4" color="#0B172A" theme="dark">
+            <v-card class="rounded-xl elevation-6 pa-4" color="#1E293B" border style="border-color: rgba(229,179,56,0.2) !important;">
               <h3 class="text-h6 font-weight-bold text-white mb-4">
                 <v-icon icon="mdi-engine-outline" color="#E5B338" class="mr-2"></v-icon>
                 Silnik Logistyczny (VROOM)
               </h3>
-
-              <v-list bg-color="transparent" class="mb-4">
-                <v-list-item>
-                  <template v-slot:prepend>
-                    <v-icon icon="mdi-account-hard-hat" color="info"></v-icon>
-                  </template>
-                  <v-list-item-title>Dostępni Kurierzy</v-list-item-title>
-                  <template v-slot:append>
-                    <span class="font-weight-bold text-h6">{{ fleet.couriers.length }}</span>
-                  </template>
-                </v-list-item>
-                
-                <v-divider color="white" class="my-2"></v-divider>
-
-                <v-list-item>
-                  <template v-slot:prepend>
-                    <v-icon icon="mdi-truck-fast" color="info"></v-icon>
-                  </template>
-                  <v-list-item-title>Wolne Pojazdy</v-list-item-title>
-                  <template v-slot:append>
-                    <span class="font-weight-bold text-h6">{{ fleet.vehicles.length }}</span>
-                  </template>
-                </v-list-item>
-              </v-list>
-
-              <v-alert v-if="unassignedParcels.length === 0" type="info" variant="tonal" density="compact" class="mb-4">
-                Brak paczek do rozwiezienia.
-              </v-alert>
-
-              <v-alert v-if="fleet.couriers.length === 0 || fleet.vehicles.length === 0" type="warning" variant="tonal" density="compact" class="mb-4">
-                Brakuje wolnych kurierów lub pojazdów do obsługi tras.
-              </v-alert>
+              
+              <div class="d-flex justify-space-between mb-2 text-grey-lighten-1">
+                <span>Dostępni Kurierzy:</span><span class="text-white font-weight-bold">{{ fleet.couriers.filter(c => c.role_id === 2).length }}</span>
+              </div>
+              <div class="d-flex justify-space-between mb-4 text-grey-lighten-1">
+                <span>Wolne VAN-y (Lokalne):</span><span class="text-white font-weight-bold">{{ fleet.vehicles.filter(v => v.vehicle_type === 'VAN').length }}</span>
+              </div>
 
               <v-btn
                 block
                 color="#E5B338"
                 size="large"
                 class="font-weight-bold rounded-lg text-black mt-4"
-                style="white-space: normal; height: auto; padding: 12px;"
-                :disabled="!isReadyToOptimize"
-                :loading="optimizing"
+                :disabled="localParcels.length === 0"
+                :loading="optimizingLocal"
                 @click="autoOptimizeRoutes"
               >
                 URUCHOM AUTOPLANOWANIE
@@ -131,6 +111,103 @@
         </v-row>
       </v-window-item>
 
+      <!-- ========================================== -->
+      <!-- ZAKŁADKA 2: LINE-HAUL (TIRY MIĘDZYMIASTOWE)-->
+      <!-- ========================================== -->
+      <v-window-item value="linehaul">
+        <v-row>
+          <v-col cols="12" md="8">
+            <v-card class="rounded-xl elevation-6 overflow-hidden mb-4" border style="border-color: rgba(255,255,255,0.1) !important; background-color: #0F172A;">
+              <v-toolbar color="transparent" flat class="border-b border-opacity-25">
+                <v-toolbar-title class="font-weight-bold text-white">
+                  <v-icon icon="mdi-earth" color="#E5B338" class="mr-2"></v-icon>
+                  Paczki Tirowe ({{ lineHaulParcels.length }})
+                </v-toolbar-title>
+                 <v-spacer></v-spacer>
+                 <v-btn icon color="#E5B338" @click="fetchData" :loading="loading">
+                  <v-icon>mdi-refresh</v-icon>
+                </v-btn>
+              </v-toolbar>
+
+              <v-data-table
+                :headers="headersLineHaul"
+                :items="lineHaulParcels"
+                class="bg-transparent text-white"
+                no-data-text="Brak paczek do innych regionów"
+              >
+                <!-- Grupowanie paczek po mieście docelowym -->
+                <template v-slot:group-header="{ item, columns, toggleGroup, isGroupOpen }">
+                  <tr>
+                    <td :colspan="columns.length" class="bg-blue-grey-darken-4">
+                      <v-btn variant="text" color="#E5B338" :icon="isGroupOpen(item) ? 'mdi-chevron-up' : 'mdi-chevron-down'" @click="toggleGroup(item)"></v-btn>
+                      Kierunek: <strong class="text-gold ml-2">{{ item.value }}</strong>
+                    </td>
+                  </tr>
+                </template>
+              </v-data-table>
+            </v-card>
+          </v-col>
+
+          <v-col cols="12" md="4">
+            <v-card class="rounded-xl elevation-6 pa-4" color="#1E293B" border style="border-color: rgba(229,179,56,0.2) !important;">
+              <h3 class="text-h6 font-weight-bold text-white mb-4">
+                <v-icon icon="mdi-truck-fast" color="#E5B338" class="mr-2"></v-icon>
+                Wyślij Transport (TIR)
+              </h3>
+
+              <v-select
+                v-model="selectedDestinationId"
+                :items="filteredDestinations"
+                item-title="name"
+                item-value="warehouse_id"
+                label="Wybierz magazyn docelowy"
+                variant="outlined"
+                color="#E5B338"
+                base-color="grey"
+                class="mb-2"
+              ></v-select>
+
+              <v-select
+                v-model="selectedTirDriverId"
+                :items="fleet.couriers"
+                item-title="first_name"
+                item-value="user_id"
+                label="Wybierz Kierowcę"
+                variant="outlined"
+                color="#E5B338"
+                base-color="grey"
+                class="mb-2"
+              ></v-select>
+
+               <v-select
+                v-model="selectedTirVehicleId"
+                :items="fleet.vehicles.filter(v => v.vehicle_type === 'TRUCK')"
+                item-title="registration_number"
+                item-value="vehicle_id"
+                label="Wybierz Ciężarówkę (TIR)"
+                variant="outlined"
+                color="#E5B338"
+                base-color="grey"
+                class="mb-4"
+              ></v-select>
+
+              <v-btn
+                block
+                color="success"
+                size="large"
+                class="font-weight-bold rounded-lg text-white"
+                :disabled="!selectedDestinationId || !selectedTirDriverId || !selectedTirVehicleId || lineHaulParcels.length === 0"
+                :loading="sendingTir"
+                @click="dispatchLineHaul"
+              >
+                ZAPAKUJ I WYŚLIJ TIRA
+              </v-btn>
+            </v-card>
+          </v-col>
+        </v-row>
+      </v-window-item>
+
+      <!-- ZAKŁADKA 3: RAPORTY -->
       <v-window-item value="reports">
         <FinancialReports /> 
       </v-window-item>
@@ -150,29 +227,55 @@ import FinancialReports from './FinancialReports.vue';
 
 const activeTab = ref('planner');
 const loading = ref(false);
-const optimizing = ref(false);
+const optimizingLocal = ref(false);
+const sendingTir = ref(false);
 
 const unassignedParcels = ref([]);
 const generatedRoutes = ref([]);
 
-const fleet = ref({
-  couriers: [],
-  vehicles: []
-});
+const selectedDestinationId = ref(null);
+const selectedTirDriverId = ref(null);
+const selectedTirVehicleId = ref(null);
 
+// NOWE ZMIENNE: Zapamiętają "kim" jest zalogowany dyspozytor
+const dispatcherRegionId = ref(null);
+const dispatcherWarehouseId = ref(null);
+
+const availableDestinations = ref([
+    { warehouse_id: 1, name: "HUB Warszawa" },
+    { warehouse_id: 2, name: "HUB Kraków" }
+]);
+
+const fleet = ref({ couriers: [], vehicles: [] });
 const snackbar = ref({ show: false, text: '', color: 'success' });
 
 const headers = [
-  { title: 'Numer Trackingowy', key: 'tracking_number', align: 'start' },
-  { title: 'Odbiorca', key: 'recipient_name' },
+  { title: 'Nr Trackingowy', key: 'tracking_number', align: 'start' },
   { title: 'Miasto', key: 'recipient_city' },
   { title: 'Ulica', key: 'recipient_street' },
   { title: 'Cena', key: 'calculated_price', align: 'end' },
 ];
 
-// Sprawdzamy, czy można odpalić algorytm
-const isReadyToOptimize = computed(() => {
-  return unassignedParcels.value.length > 0 && fleet.value.couriers.length > 0 && fleet.value.vehicles.length > 0;
+const headersLineHaul = [
+  { title: 'Kierunek', key: 'recipient_city', align: 'start' },
+  { title: 'Nr Trackingowy', key: 'tracking_number' },
+  { title: 'Status', key: 'status_name' },
+];
+
+// --- LOGIKA ROZDZIELANIA PACZEK ---
+const localParcels = computed(() => {
+    // Paczka jest lokalna TYLKO gdy jej region docelowy to MÓJ region!
+    return unassignedParcels.value.filter(p => p.target_region_id === dispatcherRegionId.value);
+});
+
+const lineHaulParcels = computed(() => {
+    // Paczka jedzie TIRem, jeśli jedzie gdziekolwiek indziej, niż MÓJ region
+    return unassignedParcels.value.filter(p => p.target_region_id && p.target_region_id !== dispatcherRegionId.value);
+});
+
+// NOWOŚĆ: Filtrujemy dropdown, żeby dyspozytor nie mógł wysłać TIRa sam do siebie
+const filteredDestinations = computed(() => {
+    return availableDestinations.value.filter(d => d.warehouse_id !== dispatcherWarehouseId.value);
 });
 
 const fetchData = async () => {
@@ -183,41 +286,54 @@ const fetchData = async () => {
       api.get('/dispatcher/fleet')
     ]);
     
+    // Zapisujemy, kim jesteśmy
+    dispatcherRegionId.value = fleetRes.data.dispatcher_region_id;
+    dispatcherWarehouseId.value = fleetRes.data.dispatcher_warehouse_id;
+
     unassignedParcels.value = parcelsRes.data;
-    
     fleet.value.couriers = fleetRes.data.couriers;
     fleet.value.vehicles = fleetRes.data.vehicles;
   } catch (error) {
-    showSnackbar('Błąd podczas pobierania danych z serwera', 'error');
+    showSnackbar('Błąd pobierania danych', 'error');
   } finally {
     loading.value = false;
   }
 };
 
-// Nowa funkcja do obsługi automatyzacji
 const autoOptimizeRoutes = async () => {
-  optimizing.value = true;
-  generatedRoutes.value = []; // Czyścimy stare wyniki
-  
+  optimizingLocal.value = true;
+  generatedRoutes.value = []; 
   try {
-    // Strzelamy do nowego endpointu, który obsłuży logikę VROOM dla całej floty
     const response = await api.post('/dispatcher/routes/auto');
-    
     if (response.data.unassigned > 0) {
-      showSnackbar(`Sukces, ale uwaga: ${response.data.unassigned} paczek nie zmieściło się do aut.`, 'warning');
+      showSnackbar(`Gotowe, ale ${response.data.unassigned} paczek zostało w HUBie.`, 'warning');
     } else {
-      showSnackbar('VROOM pomyślnie wygenerował trasy dla wszystkich paczek!', 'success');
+      showSnackbar('Sukces! Zoptymalizowano trasy VROOM.', 'success');
     }
-
     generatedRoutes.value = response.data.routes;
-    await fetchData(); // Odświeżamy magazyn (powinien być pusty, jeśli wszystko poszło ok)
-
+    await fetchData(); 
   } catch (error) {
-    showSnackbar(error.response?.data?.detail || 'Błąd podczas optymalizacji tras przez VROOM', 'error');
+    showSnackbar(error.response?.data?.detail || 'Błąd algorytmu VROOM', 'error');
   } finally {
-    optimizing.value = false;
+    optimizingLocal.value = false;
   }
 };
+
+const dispatchLineHaul = async () => {
+    sendingTir.value = true;
+    try {
+        await api.post(`/dispatcher/routes/line-haul?target_warehouse_id=${selectedDestinationId.value}&courier_id=${selectedTirDriverId.value}&vehicle_id=${selectedTirVehicleId.value}`);
+        showSnackbar('TIR wyruszył w trasę!', 'success');
+        selectedDestinationId.value = null;
+        selectedTirDriverId.value = null;
+        selectedTirVehicleId.value = null;
+        await fetchData();
+    } catch(error) {
+         showSnackbar(error.response?.data?.detail || 'Błąd wysyłki TIRa', 'error');
+    } finally {
+        sendingTir.value = false;
+    }
+}
 
 const showSnackbar = (text, color) => {
   snackbar.value = { show: true, text, color };
@@ -227,7 +343,6 @@ onMounted(fetchData);
 </script>
 
 <style scoped>
-.text-gold {
-  color: #E5B338;
-}
+.text-gold { color: #E5B338 !important; }
+:deep(.v-data-table) { background-color: transparent !important; }
 </style>

@@ -166,9 +166,13 @@ class Vehicle(Base):
     vehicle_id = Column(Integer, primary_key=True, index=True)
     registration_number = Column(String(20), unique=True, nullable=False)
     capacity_kg = Column(Float, nullable=False)
-    capacity_m3 = Column(Float, nullable=True) # Dodatkowa informacja o pojemności, przydatna do VRP
-    status = Column(String(50), default="ACTIVE") # ACTIVE, INACTIVE
+    capacity_m3 = Column(Float, nullable=True)
+    status = Column(String(50), default="ACTIVE") 
+    vehicle_type = Column(String(50), nullable=False, server_default='VAN')
 
+    # --- NOWA KOLUMNA: Pojazd należy do konkretnego HUBu ---
+    warehouse_id = Column(Integer, ForeignKey("warehouses.warehouse_id"), nullable=True)
+    
 class Route(Base):
     __tablename__ = "routes"
     
