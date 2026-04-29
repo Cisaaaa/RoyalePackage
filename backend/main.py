@@ -1022,3 +1022,49 @@ def get_route_reports(
         })
         
     return reports
+
+# PUBLICZNY SYSTEM ŚLEDZENIA (TRACKING)
+@app.get("/api/v1/tracking/{tracking_number}", summary="Publiczne śledzenie paczki")
+def track_parcel(tracking_number: str, db: Session = Depends(get_db)):
+    # 1. Szukamy paczki po unikalnym numerze
+    parcel = db.query(models.Parcel).filter(models.Parcel.tracking_number == tracking_number).first()
+    if not parcel:
+        raise HTTPException(status_code=404, detail="Paczka o podanym numerze nie istnieje.")
+    
+    # 2. Pobieramy aktualny status i adres docelowy
+    status_obj = db.query(models.Status).filter(models.Status.status_id == parcel.status_id).first()
+    address = db.query(models.Address).filter(models.Address.address_id == parcel.recipient_address_id).first()
+    
+    # 3. Pobieramy pełną oś czasu (Timeline) wygenerowaną przez Triggery w bazie!
+    history_records = db.query(models.ParcelHistory).filter(
+        models.ParcelHistory.parcel_id == parcel.parcel_id
+    ).order_by(models.ParcelHistory.updated_at).all()
+    
+    timeline = []
+    for h in history_records:
+        s = db.query(models.Status).filter(models.Status.status_id == h.status_id).first()
+        timeline.append({
+            "status": s.status_name if s else "Zaktualizowano",
+            "date": h.updated_at
+        })
+        
+    # 4. Wyciągamy ETA
+    eta = None
+    active_stop = db.query(models.RouteStop).join(
+        models.Route, models.RouteStop.route_id == models.Route.route_id
+    ).filter(
+        models.RouteStop.parcel_id == parcel.parcel_id,
+        models.Route.status.in_(["PLANNED", "IN_PROGRESS"])
+    ).first()
+    
+    if active_stop and active_stop.estimated_arrival:
+        eta = active_stop.estimated_arrival
+        
+    # 5. Składamy to w jedną paczkę danych dla Frontendu
+    return {
+        "tracking_number": parcel.tracking_number,
+        "current_status": status_obj.status_name if status_obj else "Nieznany",
+        "recipient_city": address.city if address else "Brak danych",
+        "eta": eta,
+        "timeline": timeline
+    }
