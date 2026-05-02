@@ -85,10 +85,11 @@
           </v-row>
       </div>
 
-      <div v-else-if="userRole === 2">
+      <!-- WIDOK KURIERA ORAZ KIEROWCY TIR -->
+      <div v-else-if="userRole === 2 || userRole === 5">
         <v-row class="mb-4 text-center">
           <v-col>
-            <h1 class="text-white">Panel Kuriera</h1>
+            <h1 class="text-white">Panel Kierowcy</h1>
             <p class="text-grey-lighten-1">Zarządzaj swoją dzisiejszą trasą i doręczeniami.</p>
           </v-col>
         </v-row>
@@ -111,6 +112,10 @@
         <DispatcherPanel />
       </div>
 
+      <div v-else-if="userRole === 4" class="w-100">
+        <AdminPanel />
+      </div>
+
     </v-container>
   </v-container>
 </template>
@@ -122,6 +127,7 @@ import CourierMap from './CourierMap.vue';
 import { useRouter } from 'vue-router';
 import api from '../api/axios'; // KLUCZOWY DODATEK: nasz komunikator z backendem
 import DispatcherPanel from '../components/DispatcherPanel.vue';
+import AdminPanel from '../components/AdminPanel.vue';
 
 const router = useRouter();
 

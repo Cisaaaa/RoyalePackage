@@ -171,3 +171,21 @@ class RouteReportResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+# --- SCHEMATY LOKALNE DLA EDYCJI (ADMIN) ---
+class AdminUserUpdate(BaseModel):
+    first_name: str
+    last_name: str
+    email: str
+    phone: str | None = None  # Pozwalamy na brak telefonu
+    role_id: int
+    warehouse_id: int
+    password: str | None = None  # Hasło jest opcjonalne przy edycji!
+
+class AdminVehicleUpdate(BaseModel):
+    registration_number: str
+    capacity_kg: float
+    capacity_m3: float
+    vehicle_type: str
+    warehouse_id: int
+    status: str
