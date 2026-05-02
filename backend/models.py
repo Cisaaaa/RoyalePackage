@@ -31,6 +31,7 @@ class User(Base):
     last_name = Column(String(100), nullable=False)
     phone = Column(String(20), nullable=True)
 
+    is_active = Column(Boolean, default=True)
     refresh_token = Column(String(255), nullable=True) # Do przechowywania tokena odświeżającego
 
     # Relacja zwrotna

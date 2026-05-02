@@ -19,6 +19,9 @@ import models
 # Importujemy bibliotekę do obsługi JWT refresh
 import jwt
 
+from pydantic import BaseModel
+from typing import Optional
+
 #Generowanie tabel w bazie danych na podstawie modeli (jeśli jeszcze nie istnieją)
 models.Base.metadata.create_all(bind=engine) 
 
@@ -264,6 +267,9 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depend
             detail="Nieprawidłowy email lub hasło",
             headers={"WWW-Authenticate": "Bearer"},
         )
+    
+    if not user.is_active: # <--- DODANE
+        raise HTTPException(status_code=403, detail="Konto zostało zablokowane (Pracownik zwolniony).")
     
     # Tworzymy paczkę dla Access Tokena (z rolami)
     token_data = {"sub": user.email, "role_id": user.role_id}
@@ -651,7 +657,8 @@ def get_fleet(
     
     couriers = db.query(models.User).filter(
         models.User.role_id.in_([2, 5]),
-        models.User.warehouse_id == user.warehouse_id
+        models.User.warehouse_id == user.warehouse_id,
+        models.User.is_active == True
     ).all()
     
     vehicles = db.query(models.Vehicle).filter(
@@ -1030,7 +1037,8 @@ def auto_optimize_fleet(
     # 4. Dostępni kurierzy i aktywne pojazdy (Tylko lokalne!)
     couriers = db.query(models.User).filter(
         models.User.role_id == 2,
-        models.User.warehouse_id == user.warehouse_id
+        models.User.warehouse_id == user.warehouse_id,
+        models.User.is_active == True
     ).order_by(models.User.user_id).all()
     
     # Tylko VANy i tylko z naszego magazynu!
@@ -1289,7 +1297,8 @@ def get_all_employees(admin: models.User = Depends(get_current_admin), db: Sessi
             "last_name": user.last_name,
             "email": user.email,
             "role_id": user.role_id,
-            "warehouse_name": warehouse_name if warehouse_name else "Centrala (Brak HUBu)"
+            "warehouse_name": warehouse_name if warehouse_name else "Centrala (Brak HUBu)",
+            "is_active": user.is_active
         })
     return employees
 
@@ -1320,4 +1329,163 @@ def create_employee(
     db.add(new_employee)
     db.commit()
     
-    return {"message": f"Pracownik {new_employee.first_name} został dodany do systemu!"}
+    return {"message": f"Pracownik {user_data.first_name} został dodany do systemu!"}
+
+@app.get("/api/v1/admin/vehicles", summary="Pobierz całą flotę firmy")
+def get_all_vehicles(admin: models.User = Depends(get_current_admin), db: Session = Depends(get_db)):
+    """
+    Pobiera wszystkie pojazdy w firmie wraz z przypisanymi do nich magazynami.
+    """
+    results = db.query(models.Vehicle, models.Warehouse.name).outerjoin(
+        models.Warehouse, models.Vehicle.warehouse_id == models.Warehouse.warehouse_id
+    ).all()
+    
+    vehicles = []
+    for vehicle, warehouse_name in results:
+        vehicles.append({
+            "vehicle_id": vehicle.vehicle_id,
+            "registration_number": vehicle.registration_number,
+            "capacity_kg": vehicle.capacity_kg,
+            "capacity_m3": vehicle.capacity_m3,
+            "status": vehicle.status,
+            "vehicle_type": vehicle.vehicle_type,
+            "warehouse_name": warehouse_name if warehouse_name else "Nieprzypisany"
+        })
+    return vehicles
+
+@app.post("/api/v1/admin/vehicles", status_code=status.HTTP_201_CREATED, summary="Dodaj nowy pojazd do floty")
+def create_vehicle(
+    registration_number: str,
+    capacity_kg: float,
+    capacity_m3: float,
+    vehicle_type: str,
+    warehouse_id: int,
+    admin: models.User = Depends(get_current_admin), 
+    db: Session = Depends(get_db)
+):
+    """
+    Kupuje/dodaje nowy pojazd (VAN lub TRUCK) i przypisuje go do HUBu.
+    """
+    # Sprawdzamy, czy rejestracja już istnieje
+    if db.query(models.Vehicle).filter(models.Vehicle.registration_number == registration_number).first():
+        raise HTTPException(status_code=400, detail="Pojazd o takiej rejestracji już istnieje w bazie!")
+
+    if vehicle_type not in ["VAN", "TRUCK"]:
+        raise HTTPException(status_code=400, detail="Dozwolone typy pojazdów to VAN lub TRUCK.")
+
+    new_vehicle = models.Vehicle(
+        registration_number=registration_number,
+        capacity_kg=capacity_kg,
+        capacity_m3=capacity_m3,
+        status="ACTIVE",
+        vehicle_type=vehicle_type,
+        warehouse_id=warehouse_id
+    )
+    
+    db.add(new_vehicle)
+    db.commit()
+    
+    return {"message": f"Pojazd {registration_number} dodany do floty!"}
+
+@app.get("/api/v1/admin/tariffs", summary="Pobierz cennik (taryfy)")
+def get_tariffs(admin: models.User = Depends(get_current_admin), db: Session = Depends(get_db)):
+    """
+    Pobiera wszystkie aktualne taryfy z bazy.
+    """
+    return db.query(models.DimensionalTariff).order_by(models.DimensionalTariff.tariff_id).all()
+
+@app.put("/api/v1/admin/tariffs/{tariff_id}", summary="Zmień cenę gabarytu")
+def update_tariff_price(
+    tariff_id: int, 
+    new_price: float, 
+    admin: models.User = Depends(get_current_admin), 
+    db: Session = Depends(get_db)
+):
+    """
+    Zmienia cenę bazową wybranego gabarytu.
+    """
+    tariff = db.query(models.DimensionalTariff).filter(models.DimensionalTariff.tariff_id == tariff_id).first()
+    if not tariff:
+        raise HTTPException(status_code=404, detail="Taryfa nie znaleziona")
+    
+    tariff.base_price = new_price
+    db.commit()
+    
+    return {"message": f"Cena gabarytu {tariff.size_category} zaktualizowana do {new_price} zł!"}
+
+# --- ENDPOINTY DO EDYCJI PRACOWNIKÓW I POJAZDÓW ---
+@app.put("/api/v1/admin/users/{user_id}", summary="Edytuj pracownika")
+def update_employee(user_id: int, data: schemas.AdminUserUpdate, admin: models.User = Depends(get_current_admin), db: Session = Depends(get_db)):
+    user = db.query(models.User).filter(models.User.user_id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="Nie znaleziono pracownika")
+    
+    user.first_name = data.first_name
+    user.last_name = data.last_name
+    user.email = data.email
+    user.phone = data.phone
+    user.role_id = data.role_id
+    user.warehouse_id = data.warehouse_id
+    
+    if data.password:
+        user.password_hash = security.hash_password(data.password)
+        
+    db.commit()
+    return {"message": "Zaktualizowano pracownika"}
+
+@app.put("/api/v1/admin/vehicles/{vehicle_id}", summary="Edytuj pojazd")
+def update_vehicle(vehicle_id: int, data: schemas.AdminVehicleUpdate, admin: models.User = Depends(get_current_admin), db: Session = Depends(get_db)):
+    vehicle = db.query(models.Vehicle).filter(models.Vehicle.vehicle_id == vehicle_id).first()
+    if not vehicle:
+        raise HTTPException(status_code=404, detail="Nie znaleziono pojazdu")
+    
+    vehicle.registration_number = data.registration_number
+    vehicle.capacity_kg = data.capacity_kg
+    vehicle.capacity_m3 = data.capacity_m3
+    vehicle.vehicle_type = data.vehicle_type
+    vehicle.warehouse_id = data.warehouse_id
+    vehicle.status = data.status
+    
+    db.commit()
+    return {"message": "Zaktualizowano pojazd"}
+
+@app.delete("/api/v1/admin/users/{user_id}", summary="Usuń pracownika (Soft Delete)")
+def delete_employee(user_id: int, admin: models.User = Depends(get_current_admin), db: Session = Depends(get_db)):
+    user = db.query(models.User).filter(models.User.user_id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="Nie znaleziono pracownika")
+    
+    user.is_active = False 
+    db.commit()
+    return {"message": "Pracownik zwolniony"}
+
+@app.delete("/api/v1/admin/vehicles/{vehicle_id}", summary="Usuń pojazd (Soft Delete)")
+def delete_vehicle(vehicle_id: int, admin: models.User = Depends(get_current_admin), db: Session = Depends(get_db)):
+    vehicle = db.query(models.Vehicle).filter(models.Vehicle.vehicle_id == vehicle_id).first()
+    if not vehicle:
+        raise HTTPException(status_code=404, detail="Nie znaleziono pojazdu")
+    
+    vehicle.status = "INACTIVE"
+    db.commit()
+    return {"message": "Pojazd wycofany"}
+
+# --- ENDPOINTY DO PRZYWRACANIA Z ARCHIWUM (Cofanie Soft Delete) ---
+@app.patch("/api/v1/admin/users/{user_id}/restore", summary="Przywróć pracownika")
+def restore_employee(user_id: int, admin: models.User = Depends(get_current_admin), db: Session = Depends(get_db)):
+    user = db.query(models.User).filter(models.User.user_id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="Nie znaleziono pracownika")
+    
+    user.is_active = True # Cofamy zwolnienie
+    db.commit()
+    return {"message": "Pracownik został przywrócony!"}
+
+@app.patch("/api/v1/admin/vehicles/{vehicle_id}/restore", summary="Przywróć pojazd")
+def restore_vehicle(vehicle_id: int, admin: models.User = Depends(get_current_admin), db: Session = Depends(get_db)):
+    vehicle = db.query(models.Vehicle).filter(models.Vehicle.vehicle_id == vehicle_id).first()
+    if not vehicle:
+        raise HTTPException(status_code=404, detail="Nie znaleziono pojazdu")
+    
+    vehicle.status = "ACTIVE" # Wracamy auto do floty
+    db.commit()
+    return {"message": "Pojazd powrócił do aktywnej floty!"}
