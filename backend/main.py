@@ -29,9 +29,11 @@ def seed_db():
         # 1. ROLE UŻYTKOWNIKÓW
         if db.query(models.Role).count() == 0:
             db.add_all([
-                models.Role(role_name="Klient"),
-                models.Role(role_name="Kurier"),
-                models.Role(role_name="Dyspozytor")
+                models.Role(role_name="Klient"),       # role_id = 1
+                models.Role(role_name="Kurier"),       # role_id = 2
+                models.Role(role_name="Dyspozytor"),   # role_id = 3
+                models.Role(role_name="Administrator"),# role_id = 4
+                models.Role(role_name="Kierowca TIR")  # role_id = 5 
             ])
             db.commit()
 
@@ -59,8 +61,8 @@ def seed_db():
         # 4. REGIONALIZACJA I MAGAZYNY (HUB & SPOKE)
         if db.query(models.Warehouse).count() == 0:
             # Tworzymy Regiony
-            reg_waw = models.Region(region_name="Mazowieckie")
-            reg_krk = models.Region(region_name="Małopolskie")
+            reg_waw = models.Region(region_name="Mazowieckie", polygon_geom="SRID=4326;POLYGON((20.8 52.1, 21.2 52.1, 21.2 52.3, 20.8 52.3, 20.8 52.1))")
+            reg_krk = models.Region(region_name="Małopolskie", polygon_geom="SRID=4326;POLYGON((19.8 49.9, 20.1 49.9, 20.1 50.2, 19.8 50.2, 19.8 49.9))")
             db.add_all([reg_waw, reg_krk])
             db.commit()
 
@@ -79,7 +81,7 @@ def seed_db():
             # --- DODANIE DYSPOZYTORÓW DO HUBÓW ---
             import security
             hashed_pw = security.hash_password("password123")
-            
+
             disp_waw = models.User(email="waw@royale.pl", password_hash=hashed_pw, first_name="Jan", last_name="Warszawski", role_id=3, warehouse_id=hub_waw.warehouse_id)
             disp_krk = models.User(email="krk@royale.pl", password_hash=hashed_pw, first_name="Anna", last_name="Krakowska", role_id=3, warehouse_id=hub_krk.warehouse_id)
             
@@ -87,14 +89,18 @@ def seed_db():
             courier_local = models.User(email="kurier@royale.pl", password_hash=hashed_pw, first_name="Szybki", last_name="Bill", role_id=2, warehouse_id=hub_waw.warehouse_id)
             van = models.Vehicle(registration_number="WA 12345", capacity_kg=1000.0, capacity_m3=10.0, status="ACTIVE", vehicle_type="VAN", warehouse_id=hub_waw.warehouse_id)
             
-            courier_linehaul = models.User(email="tir@royale.pl", password_hash=hashed_pw, first_name="Twardy", last_name="Roman", role_id=2, warehouse_id=hub_waw.warehouse_id)
+            courier_linehaul = models.User(email="tir@royale.pl", password_hash=hashed_pw, first_name="Twardy", last_name="Roman", role_id=5, warehouse_id=hub_waw.warehouse_id)
             truck = models.Vehicle(registration_number="TIR 99999", capacity_kg=24000.0, capacity_m3=80.0, status="ACTIVE", vehicle_type="TRUCK", warehouse_id=hub_waw.warehouse_id)
             
             # --- KRAKÓW: Lokalny kurier (VAN) ---
             courier_krk = models.User(email="krk_kurier@royale.pl", password_hash=hashed_pw, first_name="Lajkonik", last_name="Wawelski", role_id=2, warehouse_id=hub_krk.warehouse_id)
             van_krk = models.Vehicle(registration_number="KR 54321", capacity_kg=1000.0, capacity_m3=10.0, status="ACTIVE", vehicle_type="VAN", warehouse_id=hub_krk.warehouse_id)
             
-            db.add_all([disp_waw, disp_krk, courier_local, van, courier_linehaul, truck, courier_krk, van_krk])
+            # --- DODANIE ADMINISTRATORA ---
+            super_admin = models.User(email="admin@royale.pl", password_hash=hashed_pw, first_name="Super", last_name="Admin", role_id=4)
+            db.add(super_admin)
+
+            db.add_all([disp_waw, disp_krk, courier_local, van, courier_linehaul, truck, courier_krk, van_krk, super_admin])
             db.commit()
             print("SUCCESS: Struktura Regionalna (Hub & Spoke) została wgrana!")
 
@@ -153,6 +159,17 @@ app = FastAPI(
     description="API dla systemu logistycznego",
     version="1.0.0"
 )
+
+# WERYFIKACJA UPRAWNIEŃ ADMINISTRATORA
+def get_current_admin(current_user_email: str = Depends(security.get_current_user_email), db: Session = Depends(get_db)):
+    """
+    Sprawdza, czy zalogowany użytkownik ma rolę Administratora (role_id == 4).
+    Jeśli nie, natychmiast odrzuca żądanie.
+    """
+    user = db.query(models.User).filter(models.User.email == current_user_email).first()
+    if not user or user.role_id != 4:
+        raise HTTPException(status_code=403, detail="Brak uprawnień. Dostęp tylko dla Administratora.")
+    return user
 
 # WEBSOCKET MANAGER
 class ConnectionManager:
@@ -491,8 +508,8 @@ def get_courier_route(
     if not user:
         raise HTTPException(status_code=404, detail="Nie znaleziono użytkownika")
     
-    if user.role_id != 2:
-        raise HTTPException(status_code=403, detail="Brak uprawnień. Ten widok jest tylko dla kurierów.")
+    if user.role_id not in [2, 5]: 
+        raise HTTPException(status_code=403, detail="Brak uprawnień. Ten widok jest tylko dla kurierów i kierowców TIR.")
 
     # 2. Szukamy aktywnej trasy dla tego kuriera (zaplanowanej lub w trakcie)
     route = db.query(models.Route).filter(
@@ -633,7 +650,7 @@ def get_fleet(
     warehouse = db.query(models.Warehouse).filter(models.Warehouse.warehouse_id == user.warehouse_id).first()
     
     couriers = db.query(models.User).filter(
-        models.User.role_id == 2,
+        models.User.role_id.in_([2, 5]),
         models.User.warehouse_id == user.warehouse_id
     ).all()
     
@@ -837,7 +854,7 @@ def complete_route_stop(
     current_user_email: str = Depends(security.get_current_user_email)
 ):
     user = db.query(models.User).filter(models.User.email == current_user_email).first()
-    if not user or user.role_id != 2:
+    if not user or user.role_id not in [2, 5]:
         raise HTTPException(status_code=403, detail="Brak uprawnień.")
 
     stop = db.query(models.RouteStop).filter(models.RouteStop.stop_id == stop_id).first()
@@ -895,7 +912,7 @@ def complete_active_route(
     current_user_email: str = Depends(security.get_current_user_email)
 ):
     user = db.query(models.User).filter(models.User.email == current_user_email).first()
-    if not user or user.role_id != 2:
+    if not user or user.role_id not in [2, 5]: # Wpuszczamy ZARÓWNO Kurierów (2) jak i Kierowców TIR (5)
         raise HTTPException(status_code=403, detail="Brak uprawnień.")
 
     route = db.query(models.Route).filter(
@@ -913,9 +930,6 @@ def complete_active_route(
             models.RouteStop.route_id == route.route_id
         ).order_by(models.RouteStop.stop_order.desc()).first()
 
-        # Znajdujemy wszystkie paczki, które miały status 3 ("W trasie") i były przypisane do HUBu z którego wyjechał
-        # W uproszczeniu: Zmieniamy status wszystkim paczkom "W trasie", które "wzięło" to auto.
-        # W MVP możemy po prostu przenieść wszystkie paczki w systemie jadące do tego regionu na status 4 (W mag. docelowym)
         parcels_in_transit = db.query(models.Parcel).filter(models.Parcel.status_id == 3).all()
         for p in parcels_in_transit:
             p.status_id = 4 # W magazynie docelowym
@@ -924,6 +938,16 @@ def complete_active_route(
         # Oznaczamy przystanek docelowy jako wykonany
         if last_stop:
             last_stop.status = "COMPLETED"
+            
+            # --- ZMIANA: PRZENIESIENIE KIEROWCY I POJAZDU DO NOWEGO HUBu ---
+            # Przypisujemy kierowcę TIRa do magazynu docelowego, do którego właśnie dojechał
+            user.warehouse_id = last_stop.warehouse_id
+            
+            # Znajdujemy i przepisujemy też jego ciężarówkę, którą przyjechał
+            vehicle = db.query(models.Vehicle).filter(models.Vehicle.vehicle_id == route.vehicle_id).first()
+            if vehicle:
+                vehicle.warehouse_id = last_stop.warehouse_id
+            # ---------------------------------------------------------------
 
     # --- LOGIKA B: Zwykły kurier kończy zwożenie paczek do domów ---
     else:
@@ -934,7 +958,7 @@ def complete_active_route(
     route.status = "COMPLETED"
     db.commit()
     
-    return {"message": "Trasa oficjalnie zakończona. Paczki rozładowane i gotowe na ostatnią milę!"}
+    return {"message": "Trasa oficjalnie zakończona. Paczki rozładowane, a pojazd zameldowany w nowym HUBie!"}
 
 @app.websocket("/api/v1/courier/ws/{token}")
 async def courier_websocket(websocket: WebSocket, token: str, db: Session = Depends(get_db)):
@@ -1242,3 +1266,58 @@ def track_parcel(tracking_number: str, db: Session = Depends(get_db)):
         "eta": eta,
         "timeline": timeline
     }
+
+# ==========================================
+# PANEL ADMINISTRATORA (SUPER ADMIN)
+# ==========================================
+
+@app.get("/api/v1/admin/users", summary="Pobierz listę pracowników")
+def get_all_employees(admin: models.User = Depends(get_current_admin), db: Session = Depends(get_db)):
+    """
+    Pobiera wszystkich dyspozytorów i kurierów (role_id > 1) wraz z ich przypisaniem do magazynu.
+    """
+    # Używamy złączenia (JOIN), żeby od razu pobrać nazwę magazynu, w którym pracują
+    results = db.query(models.User, models.Warehouse.name).outerjoin(
+        models.Warehouse, models.User.warehouse_id == models.Warehouse.warehouse_id
+    ).filter(models.User.role_id.in_([2, 3, 4, 5])).all()
+    
+    employees = []
+    for user, warehouse_name in results:
+        employees.append({
+            "user_id": user.user_id,
+            "first_name": user.first_name,
+            "last_name": user.last_name,
+            "email": user.email,
+            "role_id": user.role_id,
+            "warehouse_name": warehouse_name if warehouse_name else "Centrala (Brak HUBu)"
+        })
+    return employees
+
+@app.post("/api/v1/admin/users", status_code=status.HTTP_201_CREATED, summary="Utwórz nowego pracownika")
+def create_employee(
+    user_data: schemas.UserCreate, # Wykorzystujemy stary schemat rejestracji!
+    warehouse_id: int, 
+    admin: models.User = Depends(get_current_admin), 
+    db: Session = Depends(get_db)
+):
+    """
+    Zatrudnia nowego pracownika (Kuriera lub Dyspozytora) i przypisuje go do HUBu.
+    """
+    # 1. Sprawdzenie, czy email jest wolny
+    if db.query(models.User).filter(models.User.email == user_data.email).first():
+        raise HTTPException(status_code=400, detail="Użytkownik o takim emailu już istnieje!")
+        
+    # 2. Utworzenie pracownika z przypisanym magazynem
+    new_employee = models.User(
+        email=user_data.email,
+        password_hash=security.hash_password(user_data.password),
+        first_name=user_data.first_name,
+        last_name=user_data.last_name,
+        phone=user_data.phone,
+        role_id=user_data.role_id, # Admin z frontendu wyśle tu 2 (Kurier) lub 3 (Dyspozytor)
+        warehouse_id=warehouse_id  # Przypisujemy pracownika do konkretnego miasta
+    )
+    db.add(new_employee)
+    db.commit()
+    
+    return {"message": f"Pracownik {new_employee.first_name} został dodany do systemu!"}

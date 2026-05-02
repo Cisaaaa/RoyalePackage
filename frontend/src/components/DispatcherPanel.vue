@@ -169,7 +169,7 @@
 
               <v-select
                 v-model="selectedTirDriverId"
-                :items="fleet.couriers"
+                :items="fleet.couriers.filter(c => c.role_id === 5)"
                 item-title="first_name"
                 item-value="user_id"
                 label="Wybierz Kierowcę"
@@ -177,6 +177,7 @@
                 color="#E5B338"
                 base-color="grey"
                 class="mb-2"
+                no-data-text="Brak wolnych kierowców TIR"
               ></v-select>
 
                <v-select
