@@ -186,7 +186,7 @@ const handleSubmit = async () => {
              message.value = 'Błąd walidacji: serwer odrzucił dane.';
         }
     } else {
-        message.value = isLoginMode.value ? 'Błędny email lub hasło.' : 'Błąd rejestracji. Użytkownik prawdopodobnie już istnieje.';
+        message.value = isLoginMode.value ? 'Błędny email lub hasło.' : 'Błąd rejestracji. Spróbuj ponownie lub sprawdź dane.';
     }
   } finally {
     isLoading.value = false;
