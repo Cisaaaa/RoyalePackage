@@ -11,6 +11,8 @@ import asyncio
 from datetime import datetime, timezone
 
 import requests
+# Importujemy funkcję do wysyłania maili
+from email_utils import send_status_email
 
 # Importujemy bazę danych i modele
 from database import engine, Base, get_db, SessionLocal
@@ -235,7 +237,12 @@ def register_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
     # 1. Sprawdzamy czy użytkownik o podanym adresie email juz istnieje
     db_user = db.query(models.User).filter(models.User.email == user.email).first()
     if db_user:
-        raise HTTPException(status_code=400, detail="Użytkownik o takim adresie email juz istnieje")
+        if db_user.is_active:
+            raise HTTPException(status_code=400, detail="Użytkownik o takim adresie email już istnieje")
+        raise HTTPException(
+            status_code=400,
+            detail="Konto z tym adresem email istnieje, ale jest zarchiwizowane. Skontaktuj się z administratorem, aby je przywrócić."
+        )
     
     # 2. Haszujemy hasło
     hashed_password = security.hash_password(user.password)
@@ -884,6 +891,7 @@ def complete_route_stop(
 @app.put("/api/v1/courier/parcels/{parcel_id}/deliver", summary="Oznacz paczkę jako doręczoną")
 def mark_parcel_delivered(
     parcel_id: int,
+    background_tasks: BackgroundTasks, # Dodajemy BackgroundTasks do obsługi maili po doręczeniu
     db: Session = Depends(get_db),
     current_user_email: str = Depends(security.get_current_user_email)
 ):
@@ -907,6 +915,16 @@ def mark_parcel_delivered(
         stop.status = "COMPLETED"
         db.flush() 
 
+    # --- 2. DODANA LOGIKA MAILA (Wysłanie powiadomienia o doręczeniu) ---
+    sender = db.query(models.User).filter(models.User.user_id == parcel.sender_id).first()
+    if sender and sender.email:
+        background_tasks.add_task(
+            send_status_email,
+            email=sender.email,
+            tracking_number=parcel.tracking_number,
+            new_status="Dostarczona"
+        )
+
     # Zapisujemy zmianę statusu paczki i przystanku
     db.commit()
 
@@ -915,6 +933,7 @@ def mark_parcel_delivered(
 # RĘCZNE ZAKOŃCZENIE TRASY PRZEZ KURIERA LUB KIEROWCĘ TIRa
 @app.put("/api/v1/courier/routes/complete", summary="Zakończ aktywną trasę i wróć do bazy")
 def complete_active_route(
+    background_tasks: BackgroundTasks, # Dodajemy BackgroundTasks do obsługi maili po zakończeniu trasy
     db: Session = Depends(get_db),
     current_user_email: str = Depends(security.get_current_user_email)
 ):
@@ -941,6 +960,18 @@ def complete_active_route(
         for p in parcels_in_transit:
             p.status_id = 4 # W magazynie docelowym
             p.current_warehouse_id = last_stop.warehouse_id # Przypisujemy fizycznie paczki do Krakowa!
+
+
+            # --- DODANA LOGIKA MAILA (Paczka w HUBie docelowym) ---
+            sender = db.query(models.User).filter(models.User.user_id == p.sender_id).first()
+            if sender and sender.email:
+                background_tasks.add_task(
+                    send_status_email,
+                    email=sender.email,
+                    tracking_number=p.tracking_number,
+                    new_status="W magazynie docelowym",
+                    eta="w następny dzień roboczy" # 
+                )
             
         # Oznaczamy przystanek docelowy jako wykonany
         if last_stop:
@@ -1160,6 +1191,20 @@ def auto_optimize_fleet(
 
             db.query(models.Parcel).filter(models.Parcel.parcel_id == parcel_id).update({"status_id": 5})
 
+            # --- NOWY KOD DO WYSYŁANIA MAILA (wewnątrz pętli) ---
+            parcel = parcel_map.get(parcel_id)
+            if parcel:
+                sender = db.query(models.User).filter(models.User.user_id == parcel.sender_id).first()  
+                if sender and sender.email:
+                    background_tasks.add_task(
+                        send_status_email,
+                        email=sender.email,
+                        tracking_number=parcel.tracking_number,
+                        new_status="Wydana kurierowi do doręczenia",
+                        eta="dziś między 9:00 a 12:00", 
+                        courier_name=f"{courier.first_name} {courier.last_name}" 
+                    )
+
             parcel = parcel_map.get(parcel_id)
             if parcel:
                 address = db.query(models.Address).filter(models.Address.address_id == parcel.recipient_address_id).first()
@@ -1313,8 +1358,14 @@ def create_employee(
     Zatrudnia nowego pracownika (Kuriera lub Dyspozytora) i przypisuje go do HUBu.
     """
     # 1. Sprawdzenie, czy email jest wolny
-    if db.query(models.User).filter(models.User.email == user_data.email).first():
-        raise HTTPException(status_code=400, detail="Użytkownik o takim emailu już istnieje!")
+    existing_user = db.query(models.User).filter(models.User.email == user_data.email).first()
+    if existing_user:
+        if existing_user.is_active:
+            raise HTTPException(status_code=400, detail="Użytkownik o takim emailu już istnieje!")
+        raise HTTPException(
+            status_code=400,
+            detail="Konto z tym adresem email jest w archiwum. Użyj opcji przywracania pracownika zamiast tworzyć nowe konto."
+        )
         
     # 2. Utworzenie pracownika z przypisanym magazynem
     new_employee = models.User(
