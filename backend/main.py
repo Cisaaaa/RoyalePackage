@@ -24,6 +24,11 @@ import jwt
 from pydantic import BaseModel
 from typing import Optional
 
+from reportlab.pdfgen import canvas
+from reportlab.lib.pagesizes import A6
+from fastapi.responses import Response
+import io
+
 #Generowanie tabel w bazie danych na podstawie modeli (jeśli jeszcze nie istnieją)
 models.Base.metadata.create_all(bind=engine) 
 
@@ -475,6 +480,26 @@ def create_parcel(
 
     db.commit()
     db.refresh(new_parcel)
+
+    # Zapis do książki adresowej (jeśli klient zaznaczył taką opcję)
+    if parcel_data.save_recipient_to_contacts:
+        # Sprawdzamy, czy takiego kontaktu już nie zapisaliśmy, by unikać duplikatów
+        existing_contact = db.query(models.SavedContact).filter(
+            models.SavedContact.user_id == user.user_id,
+            models.SavedContact.phone == parcel_data.recipient_phone,
+            models.SavedContact.first_name == parcel_data.recipient_first_name
+        ).first()
+        
+        if not existing_contact:
+            new_contact = models.SavedContact(
+                user_id=user.user_id,
+                first_name=parcel_data.recipient_first_name,
+                last_name=parcel_data.recipient_last_name,
+                phone=parcel_data.recipient_phone,
+                address_id=recipient_address.address_id
+            )
+            db.add(new_contact)
+            db.commit()
 
     return new_parcel
 
@@ -1540,3 +1565,117 @@ def restore_vehicle(vehicle_id: int, admin: models.User = Depends(get_current_ad
     vehicle.status = "ACTIVE" # Wracamy auto do floty
     db.commit()
     return {"message": "Pojazd powrócił do aktywnej floty!"}
+
+# --- HELPER: Pozbywamy się polskich znaków, żeby domyślna czcionka PDF (Helvetica) nie wybuchła ---
+def strip_accents(text: str) -> str:
+    replacements = {'ą':'a', 'ć':'c', 'ę':'e', 'ł':'l', 'ń':'n', 'ó':'o', 'ś':'s', 'ź':'z', 'ż':'z',
+                    'Ą':'A', 'Ć':'C', 'Ę':'E', 'Ł':'L', 'Ń':'N', 'Ó':'O', 'Ś':'S', 'Ź':'Z', 'Ż':'Z'}
+    for k, v in replacements.items():
+        text = text.replace(k, v)
+    return text
+
+@app.get("/api/v1/parcels/{parcel_id}/label", summary="Pobierz etykietę PDF")
+def get_parcel_label(parcel_id: int, db: Session = Depends(get_db), current_user_email: str = Depends(security.get_current_user_email)):
+    user = db.query(models.User).filter(models.User.email == current_user_email).first()
+    parcel = db.query(models.Parcel).filter(models.Parcel.parcel_id == parcel_id, models.Parcel.sender_id == user.user_id).first()
+    
+    if not parcel:
+        raise HTTPException(status_code=404, detail="Paczka nie znaleziona lub brak dostępu.")
+        
+    rec_addr = db.query(models.Address).filter(models.Address.address_id == parcel.recipient_address_id).first()
+    sen_addr = db.query(models.Address).filter(models.Address.address_id == parcel.sender_address_id).first()
+
+    buffer = io.BytesIO()
+    c = canvas.Canvas(buffer, pagesize=A6) # Format A6 (Standardowa etykieta 105 x 148 mm)
+    
+    # Rysujemy etykietę na wirtualnym płótnie
+    c.setFont("Helvetica-Bold", 16)
+    c.drawString(20, 390, "ROYALE PACKAGE")
+    
+    c.setFont("Helvetica", 10)
+    c.drawString(20, 365, "NADAWCA:")
+    c.setFont("Helvetica-Bold", 10)
+    c.drawString(20, 350, strip_accents(parcel.sender_custom_name))
+    c.setFont("Helvetica", 10)
+    c.drawString(20, 335, strip_accents(f"{sen_addr.street} {sen_addr.building_number}"))
+    c.drawString(20, 320, strip_accents(f"{sen_addr.postal_code} {sen_addr.city}"))
+    
+    c.line(20, 305, 270, 305) # Linia oddzielająca
+    
+    c.setFont("Helvetica", 12)
+    c.drawString(20, 280, "ODBIORCA:")
+    c.setFont("Helvetica-Bold", 14)
+    c.drawString(20, 260, strip_accents(parcel.recipient_custom_name))
+    c.setFont("Helvetica", 12)
+    c.drawString(20, 240, strip_accents(f"{rec_addr.street} {rec_addr.building_number}"))
+    c.drawString(20, 220, strip_accents(f"{rec_addr.postal_code} {rec_addr.city}"))
+    c.drawString(20, 200, f"Tel: {parcel.recipient_phone}")
+    
+    c.line(20, 180, 270, 180) # Linia oddzielająca
+    
+    c.setFont("Helvetica-Bold", 18)
+    c.drawCentredString(145, 140, parcel.tracking_number)
+    
+    # Symulacja Kodu Kreskowego (Ramka + Pionowe kreski)
+    c.rect(45, 80, 200, 40)
+    c.setFont("Helvetica", 12)
+    c.drawCentredString(145, 95, "|| ||| | || ||| || | ||| ||")
+    
+    c.save()
+    buffer.seek(0)
+    
+    return Response(
+        content=buffer.getvalue(), 
+        media_type="application/pdf", 
+        headers={"Content-Disposition": f"attachment; filename=etykieta_{parcel.tracking_number}.pdf"}
+    )
+
+@app.get("/api/v1/contacts", summary="Pobierz książkę adresową klienta")
+def get_contacts(current_user_email: str = Depends(security.get_current_user_email), db: Session = Depends(get_db)):
+    user = db.query(models.User).filter(models.User.email == current_user_email).first()
+    contacts = db.query(models.SavedContact).filter(models.SavedContact.user_id == user.user_id).all()
+    
+    results = []
+    # Pobieramy koordynaty z PostGIS za pomocą bezpiecznego SQLa
+    sql_coords = text("SELECT ST_X(geom) as lon, ST_Y(geom) as lat FROM addresses WHERE address_id = :id AND geom IS NOT NULL")
+    for c in contacts:
+        coords = db.execute(sql_coords, {"id": c.address_id}).fetchone()
+        lat, lon = (coords[1], coords[0]) if coords else (None, None)
+        
+        results.append({
+            "contact_id": c.contact_id,
+            "first_name": c.first_name,
+            "last_name": c.last_name,
+            "phone": c.phone,
+            "address": {
+                "street": c.address.street,
+                "building_number": c.address.building_number,
+                "city": c.address.city,
+                "postal_code": c.address.postal_code,
+                "lat": lat,
+                "lon": lon
+            }
+        })
+    return results
+
+@app.delete("/api/v1/contacts/{contact_id}", summary="Usuń kontakt z książki adresowej")
+def delete_contact(
+    contact_id: int, 
+    current_user_email: str = Depends(security.get_current_user_email), 
+    db: Session = Depends(get_db)
+):
+    # Znajdujemy użytkownika
+    user = db.query(models.User).filter(models.User.email == current_user_email).first()
+    
+    # Szukamy kontaktu, upewniając się, że należy on do zalogowanego klienta (bezpieczeństwo!)
+    contact = db.query(models.SavedContact).filter(
+        models.SavedContact.contact_id == contact_id, 
+        models.SavedContact.user_id == user.user_id
+    ).first()
+    
+    if not contact:
+        raise HTTPException(status_code=404, detail="Nie znaleziono kontaktu")
+        
+    db.delete(contact)
+    db.commit()
+    return {"message": "Kontakt usunięty z książki adresowej."}

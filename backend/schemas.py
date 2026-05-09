@@ -89,6 +89,7 @@ class ParcelCreate(BaseModel):
 
     tariff_id: int = Field(..., description="ID wybranego gabarytu")
     simulate_payment: bool = Field(False, description="Czy klient opłaca z góry")
+    save_recipient_to_contacts: bool = Field(False, description="Zapisz do kontaktów")
 
     @field_validator('sender_phone', 'recipient_phone')
     @classmethod
