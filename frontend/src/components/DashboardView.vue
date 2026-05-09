@@ -3,21 +3,17 @@
     
     <v-app-bar app color="#0B172A" elevation="4" height="80">
       <v-container class="d-flex align-center max-width-1200">
-        
         <v-icon icon="mdi-crown" color="#E5B338" size="32" class="mr-2"></v-icon>
         <div class="d-flex flex-column">
           <span class="text-white font-weight-bold text-subtitle-1 lh-1">ROYALE PACKAGE</span>
           <span class="text-gold text-caption" style="font-size: 0.6rem !important;">TWÓJ KURIER PREMIUM</span>
         </div>
-
         <v-spacer></v-spacer>
-
         <div class="d-none d-md-flex align-center">
           <v-btn variant="text" class="text-white text-capitalize mr-2">Śledzenie</v-btn>
           <v-btn variant="text" class="text-white text-capitalize mr-2">Cennik</v-btn>
           <v-btn variant="text" class="text-white text-capitalize mr-4">Pomoc</v-btn>
         </div>
-
         <v-btn color="#E5B338" variant="outlined" @click="logout" class="text-capitalize font-weight-bold rounded-lg">
           Wyloguj się
         </v-btn>
@@ -36,14 +32,25 @@
         
         <v-row>
           <v-col cols="12" md="8">
-            <ParcelForm />
+            <ParcelForm :key="formKey" />
           </v-col>
           
           <v-col cols="12" md="4">
+            
+            <v-btn 
+              block 
+              color="#1E293B" 
+              class="mb-4 text-white font-weight-bold rounded-xl border border-opacity-25" 
+              style="border-color: #E5B338 !important;" 
+              height="56"
+              @click="openContactsModal"
+            >
+              <v-icon start color="#E5B338">mdi-notebook-outline</v-icon> Książka Adresowa
+            </v-btn>
+
             <v-card class="pa-4 rounded-xl" color="#0B172A" elevation="6">
               <v-card-title class="text-gold font-weight-bold d-flex align-center">
-                <v-icon start color="#E5B338" class="mr-2">mdi-package-variant</v-icon>
-                Moje Paczki
+                <v-icon start color="#E5B338" class="mr-2">mdi-package-variant</v-icon> Moje Paczki
                 <v-spacer></v-spacer>
                 <v-btn icon="mdi-refresh" variant="text" size="small" @click="fetchMyParcels" :loading="isLoading"></v-btn>
               </v-card-title>
@@ -52,7 +59,6 @@
                 <div v-if="isLoading" class="d-flex justify-center py-4">
                   <v-progress-circular indeterminate color="#E5B338"></v-progress-circular>
                 </div>
-
                 <div v-else-if="parcels.length > 0">
                   <v-list bg-color="transparent" class="pa-0">
                     <v-list-item 
@@ -64,28 +70,27 @@
                       <template v-slot:prepend>
                         <v-icon color="#E5B338">mdi-numeric-1-box-outline</v-icon>
                       </template>
-                      
                       <v-list-item-title class="text-gold font-weight-bold text-caption">
                         {{ p.tracking_number }}
                       </v-list-item-title>
-                      
                       <v-list-item-subtitle class="text-white text-caption">
                         Status: <span class="text-grey-lighten-1">{{ p.status_name || 'Wysłano' }}</span>
                       </v-list-item-subtitle>
+                      <template v-slot:append>
+                        <v-btn icon="mdi-printer" size="small" variant="text" color="#E5B338" title="Pobierz Etykietę PDF" @click="downloadLabel(p.parcel_id, p.tracking_number)"></v-btn>
+                      </template>
                     </v-list-item>
                   </v-list>
                 </div>
-
                 <p v-else class="text-grey-lighten-1 mt-2 text-caption">
                   Brak nadanych przesyłek. Twoja pierwsza paczka pojawi się tutaj po zatwierdzeniu formularza.
                 </p>
               </v-card-text>
             </v-card>
           </v-col>
-          </v-row>
+        </v-row>
       </div>
 
-      <!-- WIDOK KURIERA ORAZ KIEROWCY TIR -->
       <div v-else-if="userRole === 2 || userRole === 5">
         <v-row class="mb-4 text-center">
           <v-col>
@@ -93,14 +98,10 @@
             <p class="text-grey-lighten-1">Zarządzaj swoją dzisiejszą trasą i doręczeniami.</p>
           </v-col>
         </v-row>
-        
         <v-row justify="center">
-          <v-col cols="12" lg="10">
-            <CourierMap />
-          </v-col>
+          <v-col cols="12" lg="10"><CourierMap /></v-col>
         </v-row>
       </div>
-
       <div v-else-if="userRole === 3">
         <v-row class="mb-4 text-center">
           <v-col>
@@ -108,15 +109,59 @@
             <p class="text-grey-lighten-1">Zarządzaj magazynem i twórz trasy dla kurierów.</p>
           </v-col>
         </v-row>
-        
         <DispatcherPanel />
       </div>
-
       <div v-else-if="userRole === 4" class="w-100">
         <AdminPanel />
       </div>
-
     </v-container>
+
+    <v-dialog v-model="dialogContacts" max-width="600px">
+      <v-card color="#0F172A" class="rounded-xl border border-opacity-25" style="border-color: #E5B338 !important;">
+        <v-card-title class="text-h5 font-weight-bold text-white pa-6 border-b border-opacity-25 d-flex align-center">
+          <v-icon color="#E5B338" class="mr-3">mdi-notebook-outline</v-icon> Twoja Książka Adresowa
+          <v-spacer></v-spacer>
+          <v-btn icon="mdi-close" variant="text" color="white" @click="closeContactsModal"></v-btn>
+        </v-card-title>
+        
+        <v-card-text class="pa-6">
+          <div v-if="isLoadingContacts" class="d-flex justify-center py-4">
+            <v-progress-circular indeterminate color="#E5B338"></v-progress-circular>
+          </div>
+          
+          <v-list v-else-if="myContacts.length > 0" bg-color="transparent" class="pa-0">
+            <v-list-item
+              v-for="c in myContacts"
+              :key="c.contact_id"
+              class="mb-3 rounded-lg border border-opacity-10 pa-3"
+              style="background-color: #1E293B;"
+            >
+              <template v-slot:prepend>
+                <v-avatar color="#E5B338" size="40" class="mr-3">
+                  <span class="text-black font-weight-bold">{{ c.first_name.charAt(0) }}{{ c.last_name.charAt(0) }}</span>
+                </v-avatar>
+              </template>
+              
+              <v-list-item-title class="text-white font-weight-bold">{{ c.first_name }} {{ c.last_name }}</v-list-item-title>
+              <v-list-item-subtitle class="text-grey-lighten-1 text-caption mt-1">
+                {{ c.address.street }} {{ c.address.building_number }}, {{ c.address.city }}
+              </v-list-item-subtitle>
+              <v-list-item-subtitle class="text-gold text-caption">Tel: {{ c.phone }}</v-list-item-subtitle>
+              
+              <template v-slot:append>
+                <v-btn icon="mdi-delete" variant="tonal" color="error" size="small" @click="deleteContact(c.contact_id)" title="Usuń z książki"></v-btn>
+              </template>
+            </v-list-item>
+          </v-list>
+          
+          <div v-else class="text-center py-8">
+            <v-icon size="48" color="grey-darken-1" class="mb-2">mdi-account-off-outline</v-icon>
+            <p class="text-grey-lighten-1">Nie masz jeszcze żadnych zapisanych kontaktów.</p>
+          </div>
+        </v-card-text>
+      </v-card>
+    </v-dialog>
+
   </v-container>
 </template>
 
@@ -125,7 +170,7 @@ import { ref, onMounted } from 'vue';
 import ParcelForm from './ParcelForm.vue';
 import CourierMap from './CourierMap.vue';
 import { useRouter } from 'vue-router';
-import api from '../api/axios'; // KLUCZOWY DODATEK: nasz komunikator z backendem
+import api from '../api/axios';
 import DispatcherPanel from '../components/DispatcherPanel.vue';
 import AdminPanel from '../components/AdminPanel.vue';
 
@@ -133,14 +178,18 @@ const router = useRouter();
 
 // Stan dla roli i paczek
 const userRole = ref<number>(1);
-const parcels = ref<any[]>([]); // Tu będą przechowywane paczki pobrane z bazy danych
-const isLoading = ref(false); // Flaga ładowania dla ikonki odświeżania
+const parcels = ref<any[]>([]);
+const isLoading = ref(false);
 
-// FUNKCJA POBIERAJĄCA DANE: łączy się z bazą i pobiera listę paczek użytkownika
+// --- STAN DLA KSIĄŻKI ADRESOWEJ ---
+const formKey = ref(0); // Zmienna wymuszająca odświeżenie formularza po zamknięciu modala
+const dialogContacts = ref(false);
+const myContacts = ref<any[]>([]);
+const isLoadingContacts = ref(false);
+
 const fetchMyParcels = async () => {
   try {
     isLoading.value = true;
-    // Wysyłamy prośbę do backendu o paczki przypisane do zalogowanego konta
     const response = await api.get('/parcels'); 
     parcels.value = response.data;
   } catch (error) {
@@ -150,20 +199,64 @@ const fetchMyParcels = async () => {
   }
 };
 
-// Funkcja wylogowania - teraz jedna, czysta wersja korzystająca z routera
+const downloadLabel = async (parcelId: number, trackingNumber: string) => {
+  try {
+    const response = await api.get(`/parcels/${parcelId}/label`, { responseType: 'blob' });
+    const url = window.URL.createObjectURL(new Blob([response.data]));
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', `Etykieta_${trackingNumber}.pdf`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  } catch (error) {
+    console.error("Błąd pobierania etykiety:", error);
+  }
+};
+
+// --- FUNKCJE KSIĄŻKI ADRESOWEJ ---
+const openContactsModal = async () => {
+  dialogContacts.value = true;
+  await fetchContacts();
+};
+
+const closeContactsModal = () => {
+  dialogContacts.value = false;
+  formKey.value += 1; // Ta linijka odświeża komponent ParcelForm, aktualizując jego dropdown!
+};
+
+const fetchContacts = async () => {
+  isLoadingContacts.value = true;
+  try {
+    const response = await api.get('/contacts');
+    myContacts.value = response.data;
+  } catch (e) {
+    console.error("Błąd pobierania kontaktów", e);
+  } finally {
+    isLoadingContacts.value = false;
+  }
+};
+
+const deleteContact = async (contactId: number) => {
+  try {
+    await api.delete(`/contacts/${contactId}`);
+    await fetchContacts(); // Odświeżamy listę widoczną w modalu
+  } catch (e) {
+    console.error("Błąd usuwania kontaktu", e);
+    alert("Wystąpił błąd podczas usuwania kontaktu.");
+  }
+};
+
 const logout = () => {
   localStorage.clear();
   router.push('/login'); 
 };
 
 onMounted(() => {
-  // 1. Sprawdzamy rolę, żeby wiedzieć co wyświetlić (Klient/Kurier/Dyspozytor)
   const roleFromStorage = localStorage.getItem('user_role');
   if (roleFromStorage) {
     userRole.value = parseInt(roleFromStorage);
   }
-
-  // 2. Jeśli zalogowany to Klient (rola 1), od razu pobieramy jego paczki
   if (userRole.value === 1) {
     fetchMyParcels();
   }

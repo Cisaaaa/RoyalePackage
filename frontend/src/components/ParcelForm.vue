@@ -49,6 +49,21 @@
       <v-divider class="my-6 border-opacity-25" color="#E5B338"></v-divider>
 
       <h3 class="text-gold mb-4 text-subtitle-1 font-weight-bold text-uppercase letter-spacing-1">Dane Odbiorcy</h3>
+
+      <v-select
+        v-if="contacts.length > 0"
+        v-model="selectedContact"
+        :items="contacts"
+        item-title="label"
+        item-value="contact_id"
+        label="Wybierz zapisanego odbiorcę (Opcjonalnie)"
+        variant="outlined"
+        color="#E5B338"
+        base-color="grey"
+        class="mb-4"
+        clearable
+        @update:modelValue="fillContactData"
+      ></v-select>
       <v-row dense>
         <v-col cols="12" md="6">
           <p class="text-caption text-grey-lighten-1 mb-1 font-weight-bold text-uppercase">Imię</p>
@@ -100,6 +115,7 @@
         </v-col>
         <v-col cols="12" md="6" class="d-flex align-center justify-center pt-md-6">
           <v-checkbox v-model="formData.simulate_payment" label="Potwierdzam opłatę z góry (Symulacja)" color="#E5B338" class="text-white font-weight-bold" hide-details></v-checkbox>
+          <v-checkbox v-model="formData.save_recipient_to_contacts" label="Zapisz tego odbiorcę w Książce Adresowej" color="#E5B338" class="text-white font-weight-bold w-100" hide-details></v-checkbox>
         </v-col>
       </v-row>
 
@@ -165,8 +181,38 @@ const formData = ref({
   recipient_address: { street: '', building_number: '', city: '', postal_code: '', lat: null as number | null, lon: null as number | null },
   
   tariff_id: 1, 
-  simulate_payment: false
+  simulate_payment: false,
+  save_recipient_to_contacts: false
 });
+
+// --- STAN KSIĄŻKI ADRESOWEJ ---
+const contacts = ref<any[]>([]);
+const selectedContact = ref(null);
+
+const fetchContacts = async () => {
+  try {
+    const response = await api.get('/contacts');
+    // Generujemy ładną etykietę dla dropdowna (Imię Nazwisko - Miasto, Ulica)
+    contacts.value = response.data.map((c: any) => ({
+      ...c,
+      label: `${c.first_name} ${c.last_name} - ${c.address.city}, ${c.address.street}`
+    }));
+  } catch (error) {
+    console.error("Błąd pobierania kontaktów", error);
+  }
+};
+
+const fillContactData = (contactId: any) => {
+  if (!contactId) return; // Jeśli użytkownik "wyczyści" pole
+  const contact = contacts.value.find(c => c.contact_id === contactId);
+  if (contact) {
+    formData.value.recipient_first_name = contact.first_name;
+    formData.value.recipient_last_name = contact.last_name;
+    formData.value.recipient_phone = contact.phone;
+    // Kopiujemy wszystkie dane adresowe wraz z GPS (dzięki temu VROOM działa idealnie bez ponownego wpisywania!)
+    formData.value.recipient_address = { ...contact.address };
+  }
+};
 
 const basePrice = computed(() => {
   if (formData.value.tariff_id === 1) return 15.99;
@@ -190,6 +236,7 @@ const rules = {
 
 // --- MAGIA GOOGLE PLACES API ---
 onMounted(() => {
+  fetchContacts(); // Pobieramy kontakty przy montowaniu komponentu
   // Funkcja pomocnicza do "rozpakowywania" danych od Google
   const extractAddressData = (place: any, targetObject: any) => {
     targetObject.street = '';

@@ -210,3 +210,18 @@ class RouteStop(Base):
     estimated_arrival = Column(DateTime(timezone=True), nullable=True)
 
     route = relationship("Route", back_populates="stops")
+
+# ==========================================
+# WARSTWA 5: KSIĄŻKA ADRESOWA
+# ==========================================
+class SavedContact(Base):
+    __tablename__ = "saved_contacts"
+    
+    contact_id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.user_id"), nullable=False) # Kto jest właścicielem kontaktu
+    first_name = Column(String(100), nullable=False)
+    last_name = Column(String(100), nullable=False)
+    phone = Column(String(20), nullable=False)
+    address_id = Column(Integer, ForeignKey("addresses.address_id"), nullable=False) # Podpinamy istniejącą strukturę adresów!
+    
+    address = relationship("Address")
