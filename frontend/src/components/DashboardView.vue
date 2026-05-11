@@ -52,7 +52,7 @@
               <v-card-title class="text-gold font-weight-bold d-flex align-center">
                 <v-icon start color="#E5B338" class="mr-2">mdi-package-variant</v-icon> Moje Paczki
                 <v-spacer></v-spacer>
-                <v-btn icon="mdi-refresh" variant="text" size="small" @click="fetchMyParcels" :loading="isLoading"></v-btn>
+                <v-btn icon="mdi-refresh" variant="text" size="small" @click="refreshClientData" :loading="isLoading"></v-btn>
               </v-card-title>
 
               <v-card-text class="mt-2">
@@ -76,8 +76,31 @@
                       <v-list-item-subtitle class="text-white text-caption">
                         Status: <span class="text-grey-lighten-1">{{ p.status_name || 'Wysłano' }}</span>
                       </v-list-item-subtitle>
+                      <div class="mt-2 d-flex flex-wrap align-center ga-2">
+                        <v-chip
+                          v-if="complaintStatusByParcel[p.parcel_id]"
+                          size="x-small"
+                          :color="getComplaintChipColor(complaintStatusByParcel[p.parcel_id])"
+                          variant="flat"
+                          class="font-weight-bold"
+                        >
+                          Reklamacja: {{ getComplaintLabel(complaintStatusByParcel[p.parcel_id]) }}
+                        </v-chip>
+
+                        <v-btn
+                          v-if="canSubmitComplaint(p)"
+                          size="x-small"
+                          color="error"
+                          variant="outlined"
+                          @click="openComplaintDialog(p)"
+                        >
+                          Zgłoś reklamację
+                        </v-btn>
+                      </div>
                       <template v-slot:append>
-                        <v-btn icon="mdi-printer" size="small" variant="text" color="#E5B338" title="Pobierz Etykietę PDF" @click="downloadLabel(p.parcel_id, p.tracking_number)"></v-btn>
+                        <div class="d-flex align-center">
+                          <v-btn icon="mdi-printer" size="small" variant="text" color="#E5B338" title="Pobierz Etykietę PDF" @click="downloadLabel(p.parcel_id, p.tracking_number)"></v-btn>
+                        </div>
                       </template>
                     </v-list-item>
                   </v-list>
@@ -162,6 +185,49 @@
       </v-card>
     </v-dialog>
 
+    <v-dialog v-model="complaintDialog" max-width="500px">
+      <v-card color="#0F172A" class="rounded-xl border border-opacity-25" style="border-color: #E5B338 !important;">
+        <v-card-title class="text-h5 font-weight-bold text-white pa-6 border-b border-opacity-25 d-flex align-center">
+          <v-icon color="#E5B338" class="mr-3">mdi-alert-circle-outline</v-icon>
+          Zgłoś reklamację
+          <v-spacer></v-spacer>
+          <v-btn icon="mdi-close" variant="text" color="white" @click="closeComplaintDialog"></v-btn>
+        </v-card-title>
+
+        <v-card-text class="pa-6">
+          <p class="text-grey-lighten-1 mb-4" v-if="selectedParcel">
+            Reklamujesz paczkę nr: <strong class="text-white">{{ selectedParcel.tracking_number }}</strong>
+          </p>
+
+          <v-select
+            v-model="complaintForm.reason"
+            :items="['Uszkodzenie zawartości', 'Zaginięcie paczki', 'Opóźnienie doręczenia', 'Inne']"
+            label="Powód reklamacji"
+            variant="outlined"
+            color="#E5B338"
+            class="mb-3"
+            required
+          ></v-select>
+
+          <v-textarea
+            v-model="complaintForm.description"
+            label="Opis sytuacji (opcjonalnie)"
+            rows="3"
+            variant="outlined"
+            color="#E5B338"
+          ></v-textarea>
+        </v-card-text>
+
+        <v-card-actions class="pa-6 pt-0">
+          <v-spacer></v-spacer>
+          <v-btn color="blue-grey-lighten-1" variant="text" @click="closeComplaintDialog">Anuluj</v-btn>
+          <v-btn color="error" variant="text" @click="submitComplaintForm" :loading="isSubmitting">
+            Wyślij reklamację
+          </v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
   </v-container>
 </template>
 
@@ -170,7 +236,7 @@ import { ref, onMounted } from 'vue';
 import ParcelForm from './ParcelForm.vue';
 import CourierMap from './CourierMap.vue';
 import { useRouter } from 'vue-router';
-import api from '../api/axios';
+import api, { submitComplaint, getMyComplaints } from '../api/axios';
 import DispatcherPanel from '../components/DispatcherPanel.vue';
 import AdminPanel from '../components/AdminPanel.vue';
 
@@ -187,6 +253,16 @@ const dialogContacts = ref(false);
 const myContacts = ref<any[]>([]);
 const isLoadingContacts = ref(false);
 
+// --- STAN REKLAMACJI ---
+const complaintDialog = ref(false);
+const selectedParcel = ref<any | null>(null);
+const isSubmitting = ref(false);
+const complaintForm = ref({
+  reason: '',
+  description: ''
+});
+const complaintStatusByParcel = ref<Record<number, string>>({});
+
 const fetchMyParcels = async () => {
   try {
     isLoading.value = true;
@@ -197,6 +273,43 @@ const fetchMyParcels = async () => {
   } finally {
     isLoading.value = false;
   }
+};
+
+const fetchMyComplaints = async () => {
+  try {
+    const complaints = await getMyComplaints();
+    const byParcel: Record<number, string> = {};
+    complaints.forEach((c: any) => {
+      byParcel[c.parcel_id] = c.status;
+    });
+    complaintStatusByParcel.value = byParcel;
+  } catch (error) {
+    console.error('Błąd podczas pobierania reklamacji klienta:', error);
+  }
+};
+
+const getComplaintLabel = (status: string) => {
+  if (status === 'PENDING') return 'Oczekująca';
+  if (status === 'ACCEPTED') return 'Uznana';
+  if (status === 'REJECTED') return 'Odrzucona';
+  return status;
+};
+
+const getComplaintChipColor = (status: string) => {
+  if (status === 'PENDING') return 'warning';
+  if (status === 'ACCEPTED') return 'success';
+  if (status === 'REJECTED') return 'error';
+  return 'grey';
+};
+
+const canSubmitComplaint = (parcel: any) => {
+  const isDelivered = parcel.status_name === 'Dostarczona' || parcel.status_id === 6;
+  const hasComplaint = !!complaintStatusByParcel.value[parcel.parcel_id];
+  return isDelivered && !hasComplaint;
+};
+
+const refreshClientData = async () => {
+  await Promise.all([fetchMyParcels(), fetchMyComplaints()]);
 };
 
 const downloadLabel = async (parcelId: number, trackingNumber: string) => {
@@ -247,6 +360,49 @@ const deleteContact = async (contactId: number) => {
   }
 };
 
+const openComplaintDialog = (parcel: any) => {
+  selectedParcel.value = parcel;
+  complaintForm.value.reason = '';
+  complaintForm.value.description = '';
+  complaintDialog.value = true;
+};
+
+const closeComplaintDialog = () => {
+  complaintDialog.value = false;
+  selectedParcel.value = null;
+};
+
+const submitComplaintForm = async () => {
+  if (!complaintForm.value.reason) {
+    alert('Proszę wybrać powód reklamacji.');
+    return;
+  }
+
+  if (!selectedParcel.value) {
+    alert('Nie wybrano paczki do reklamacji.');
+    return;
+  }
+
+  isSubmitting.value = true;
+  try {
+    await submitComplaint({
+      parcel_id: selectedParcel.value.parcel_id,
+      reason: complaintForm.value.reason,
+      description: complaintForm.value.description
+    });
+
+    alert('Reklamacja została przyjęta.');
+    closeComplaintDialog();
+    await refreshClientData();
+  } catch (error) {
+    console.error('Błąd podczas wysyłania reklamacji:', error);
+    const detail = (error as any)?.response?.data?.detail;
+    alert(detail || 'Wystąpił błąd podczas zgłaszania reklamacji.');
+  } finally {
+    isSubmitting.value = false;
+  }
+};
+
 const logout = () => {
   localStorage.clear();
   router.push('/login'); 
@@ -258,7 +414,7 @@ onMounted(() => {
     userRole.value = parseInt(roleFromStorage);
   }
   if (userRole.value === 1) {
-    fetchMyParcels();
+    refreshClientData();
   }
 });
 </script>
