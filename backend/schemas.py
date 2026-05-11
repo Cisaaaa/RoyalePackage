@@ -1,5 +1,7 @@
+from datetime import datetime
 import re
 from pydantic import BaseModel, Field, field_validator, model_validator
+from typing import Optional
 
 # --- FUNKCJA POMOCNICZA DLA TELEFONÓW ---
 def normalize_polish_phone(v: str | None) -> str | None:
@@ -90,6 +92,7 @@ class ParcelCreate(BaseModel):
     tariff_id: int = Field(..., description="ID wybranego gabarytu")
     simulate_payment: bool = Field(False, description="Czy klient opłaca z góry")
     save_recipient_to_contacts: bool = Field(False, description="Zapisz do kontaktów")
+    declared_value: Optional[float] = 0.0
 
     @field_validator('sender_phone', 'recipient_phone')
     @classmethod
@@ -190,3 +193,28 @@ class AdminVehicleUpdate(BaseModel):
     vehicle_type: str
     warehouse_id: int
     status: str
+
+
+# --- REKLAMACJE ---
+
+class ComplaintBase(BaseModel):
+    parcel_id: int
+    reason: str
+    description: Optional[str] = None
+
+class ComplaintCreate(ComplaintBase):
+    pass
+
+class ComplaintUpdate(BaseModel):
+    status: str  # ACCEPTED lub REJECTED
+    
+class Complaint(ComplaintBase):
+    complaint_id: int
+    user_id: int
+    status: str
+    refund_amount: Optional[float] = None
+    created_at: datetime
+    resolved_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True

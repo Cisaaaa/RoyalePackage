@@ -13,6 +13,10 @@
         <v-icon start>mdi-chart-bar</v-icon>
         Raporty i Koszty
       </v-tab>
+      <v-tab value="complaints">
+        <v-icon start>mdi-alert-circle-outline</v-icon>
+        Reklamacje
+      </v-tab>
     </v-tabs>
 
     <v-window v-model="activeTab">
@@ -212,6 +216,49 @@
       <v-window-item value="reports">
         <FinancialReports /> 
       </v-window-item>
+      
+      <v-window-item value="complaints">
+  <v-card flat>
+    <v-card-title>Zgłoszenia reklamacyjne</v-card-title>
+    <v-card-text>
+      <v-data-table
+        :headers="complaintHeaders"
+        :items="complaintsList"
+        :loading="loadingComplaints"
+        class="elevation-1"
+      >
+        <template v-slot:item.status="{ item }">
+          <v-chip
+            :color="item.status === 'PENDING' ? 'warning' : item.status === 'ACCEPTED' ? 'success' : 'error'"
+            size="small"
+            text-color="white"
+          >
+            {{ item.status === 'PENDING' ? 'Oczekująca' : item.status === 'ACCEPTED' ? 'Uznana' : 'Odrzucona' }}
+          </v-chip>
+        </template>
+        
+        <template v-slot:item.actions="{ item }">
+          <div v-if="item.status === 'PENDING'">
+             <v-btn size="small" color="success" class="mr-2" @click="handleResolveComplaint(item.complaint_id, 'ACCEPTED')">
+               <v-icon left>mdi-check</v-icon> Uznaj
+             </v-btn>
+             <v-btn size="small" color="error" @click="handleResolveComplaint(item.complaint_id, 'REJECTED')">
+               <v-icon left>mdi-close</v-icon> Odrzuć
+             </v-btn>
+          </div>
+          <div v-else>
+            <span v-if="item.status === 'ACCEPTED'" class="text-success font-weight-bold">
+              Zwrot: {{ item.refund_amount }} zł
+            </span>
+            <span v-else class="text-grey">Rozpatrzona</span>
+          </div>
+        </template>
+      </v-data-table>
+    </v-card-text>
+  </v-card>
+</v-window-item>
+
+
 
     </v-window>
 
@@ -225,6 +272,7 @@
 import { ref, onMounted, computed } from 'vue';
 import api from '../api/axios';
 import FinancialReports from './FinancialReports.vue'; 
+import { getComplaints, resolveComplaint } from '../api/axios';
 
 const activeTab = ref('planner');
 const loading = ref(false);
@@ -279,6 +327,20 @@ const filteredDestinations = computed(() => {
     return availableDestinations.value.filter(d => d.warehouse_id !== dispatcherWarehouseId.value);
 });
 
+
+// --- Stan dla Reklamacji ---
+const complaintsList = ref([]);
+const loadingComplaints = ref(false);
+
+const complaintHeaders = [
+  { title: 'ID Reklamacji', key: 'complaint_id' },
+  { title: 'ID Paczki', key: 'parcel_id' },
+  { title: 'Powód', key: 'reason' },
+  { title: 'Opis klienta', key: 'description' },
+  { title: 'Status', key: 'status' },
+  { title: 'Akcje', key: 'actions', sortable: false }
+];
+
 const fetchData = async () => {
   loading.value = true;
   try {
@@ -320,6 +382,39 @@ const autoOptimizeRoutes = async () => {
   }
 };
 
+// Funkcja pobierająca listę reklamacji
+const fetchComplaints = async () => {
+  loadingComplaints.value = true;
+  try {
+    complaintsList.value = await getComplaints();
+  } catch (error) {
+    console.error("Błąd podczas pobierania reklamacji:", error);
+    showSnackbar('Nie udało się pobrać listy reklamacji.', 'error');
+  } finally {
+    loadingComplaints.value = false;
+  }
+};
+
+// Funkcja wywoływana po kliknięciu Uznaj/Odrzuć
+const handleResolveComplaint = async (complaintId, newStatus) => {
+  try {
+    const response = await resolveComplaint(complaintId, newStatus);
+    
+    // Pokaż powiadomienie z informacją o kwocie zwrotu
+    showSnackbar(response.message + (response.refund > 0 ? ` Zwrócono: ${response.refund} zł` : ''), 'success');
+
+    // Odśwież tabelę
+    await fetchComplaints();
+    
+  } catch (error) {
+    console.error("Błąd podczas rozpatrywania:", error);
+    showSnackbar('Błąd podczas zmiany statusu reklamacji.', 'error');
+  }
+};
+
+
+
+
 const dispatchLineHaul = async () => {
     sendingTir.value = true;
     try {
@@ -340,7 +435,10 @@ const showSnackbar = (text, color) => {
   snackbar.value = { show: true, text, color };
 };
 
-onMounted(fetchData);
+onMounted(async () => {
+  await fetchData();
+  await fetchComplaints();
+});
 </script>
 
 <style scoped>

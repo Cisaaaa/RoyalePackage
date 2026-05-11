@@ -105,13 +105,28 @@
       <v-divider class="my-6 border-opacity-25" color="#E5B338"></v-divider>
 
       <v-row dense class="align-center mb-6">
-        <v-col cols="12" md="6">
+        <v-col cols="12" md="6" class="d-flex align-center">
           <p class="text-caption text-grey-lighten-1 mb-1 font-weight-bold text-uppercase">Kategoria Gabarytowa</p>
           <v-select 
             v-model="formData.tariff_id" 
             :items="[{title: 'Kategoria A (do 2 kg) - 15.99 zł', value: 1}, {title: 'Kategoria B (do 10 kg) - 20.99 zł', value: 2}, {title: 'Kategoria C (do 30 kg) - 29.99 zł', value: 3}]"
             variant="solo-filled" bg-color="#1E293B" color="#E5B338" base-color="transparent" class="custom-input"
           ></v-select>
+        </v-col>
+        <v-col cols="12" md="6" class="d-flex align-center">
+          <v-text-field
+            v-model.number="formData.declared_value"
+            label="Zadeklarowana wartość przedmiotu (PLN)"
+            type="number"
+            min="0"
+            prepend-inner-icon="mdi-cash"
+            hint="Podaj wartość paczki w razie zgłoszenia reklamacji"
+            persistent-hint
+            variant="solo-filled"
+            bg-color="#1E293B"
+            color="#E5B338"
+            class="custom-input"
+          ></v-text-field>
         </v-col>
         <v-col cols="12" md="6" class="d-flex align-center justify-center pt-md-6">
           <v-checkbox v-model="formData.simulate_payment" label="Potwierdzam opłatę z góry (Symulacja)" color="#E5B338" class="text-white font-weight-bold" hide-details></v-checkbox>
@@ -183,6 +198,8 @@ const formData = ref({
   tariff_id: 1, 
   simulate_payment: false,
   save_recipient_to_contacts: false
+  ,
+  declared_value: 0.0
 });
 
 // --- STAN KSIĄŻKI ADRESOWEJ ---

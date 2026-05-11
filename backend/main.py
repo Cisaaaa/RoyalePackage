@@ -456,6 +456,7 @@ def create_parcel(
         recipient_address_id=recipient_address.address_id,
         tariff_id=parcel_data.tariff_id,
         calculated_price=final_price,
+        declared_value=parcel_data.declared_value,
         current_warehouse_id=start_warehouse_id, 
         status_id=1,
 
@@ -1679,3 +1680,93 @@ def delete_contact(
     db.delete(contact)
     db.commit()
     return {"message": "Kontakt usunięty z książki adresowej."}
+
+
+
+# Zgłaszanie reklamacji przez klienta (np. paczka uszkodzona, nie dostarczona, itp.)
+
+@app.post("/api/v1/client/complaints", response_model=schemas.Complaint, summary="Zgłoś reklamację do paczki")
+def create_complaint(
+    complaint_in: schemas.ComplaintCreate,
+    db: Session = Depends(get_db),
+    current_user_email: str = Depends(security.get_current_user_email) # Pobieramy email zalogowanego klienta, żeby znaleźć jego ID i zweryfikować, że reklamuje własną paczkę
+):
+    user = db.query(models.User).filter(models.User.email == current_user_email).first() # Pobieramy dane zalogowanego klienta
+    parcel = db.query(models.Parcel).filter(models.Parcel.parcel_id == complaint_in.parcel_id).first() # Pobieramy paczkę, do której klient chce zgłosić reklamację
+    
+    if not parcel:
+        raise HTTPException(status_code=404, detail="Nie znaleziono paczki")
+    
+    # Sprawdzam, czy to na pewno paczka tego użytkownika
+    if parcel.sender_id != user.user_id:
+        raise HTTPException(status_code=403, detail="Możesz reklamować tylko własne paczki")
+
+    # Reklamację można zgłosić dopiero po dostarczeniu paczki
+    if parcel.status_id != 6:
+        raise HTTPException(status_code=400, detail="Reklamację można zgłosić tylko dla paczki dostarczonej")
+
+    # Jedna paczka = jedna reklamacja klienta (bez duplikatów)
+    existing_complaint = db.query(models.Complaint).filter(
+        models.Complaint.parcel_id == complaint_in.parcel_id,
+        models.Complaint.user_id == user.user_id
+    ).first()
+    if existing_complaint:
+        raise HTTPException(status_code=400, detail="Dla tej paczki istnieje już zgłoszona reklamacja")
+    
+    
+    new_complaint = models.Complaint(
+        parcel_id=complaint_in.parcel_id,
+        user_id=user.user_id,
+        reason=complaint_in.reason,
+        description=complaint_in.description,
+        status="PENDING"
+    )
+    db.add(new_complaint)
+    db.commit()
+    db.refresh(new_complaint)
+    return new_complaint
+
+@app.get("/api/v1/client/complaints", response_model=list[schemas.Complaint], summary="Pobierz moje reklamacje")
+def get_my_complaints(
+    db: Session = Depends(get_db),
+    current_user_email: str = Depends(security.get_current_user_email)
+):
+    user = db.query(models.User).filter(models.User.email == current_user_email).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="Nie znaleziono użytkownika")
+
+    return db.query(models.Complaint).filter(models.Complaint.user_id == user.user_id).all()
+
+# Endpoint dla pracowników (Dyspozytorów) do przeglądania wszystkich zgłoszonych reklamacji
+
+@app.get("/api/v1/dispatcher/complaints", response_model=list[schemas.Complaint])
+def get_all_complaints(db: Session = Depends(get_db)):
+    # Pobieram wszystkie reklamacje do panelu pracownika
+    return db.query(models.Complaint).all()
+
+
+# Endpoint dla pracowników (Dyspozytorów) do rozpatrywania reklamacji (akceptacja lub odrzucenie) i ewentualnego wyliczenia kwoty zwrotu dla klienta
+
+@app.patch("/api/v1/dispatcher/complaints/{complaint_id}/resolve")
+def resolve_complaint(
+    complaint_id: int,
+    update_data: schemas.ComplaintUpdate,
+    db: Session = Depends(get_db)
+):
+    complaint = db.query(models.Complaint).filter(models.Complaint.complaint_id == complaint_id).first()
+    if not complaint:
+        raise HTTPException(status_code=404, detail="Reklamacja nie istnieje")
+
+    complaint.status = update_data.status
+    complaint.resolved_at = datetime.utcnow()
+
+    # Jeśli uznaję reklamację, wyliczam kwotę zwrotu
+    if update_data.status == "ACCEPTED":
+        parcel = db.query(models.Parcel).filter(models.Parcel.parcel_id == complaint.parcel_id).first()
+        # Zwracam wartość towaru + koszt przesyłki
+        complaint.refund_amount = (parcel.declared_value or 0.0) + parcel.calculated_price
+    else:
+        complaint.refund_amount = 0.0
+
+    db.commit()
+    return {"message": f"Reklamacja została {update_data.status.lower()}.", "refund": complaint.refund_amount}

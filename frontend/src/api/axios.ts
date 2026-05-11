@@ -1,5 +1,4 @@
 import axios from 'axios';
-import { error } from 'console';
 
 const api = axios.create({
   baseURL: 'http://localhost:8000/api/v1', // Adres backendu FastAPI
@@ -69,5 +68,31 @@ api.interceptors.response.use(
         return Promise.reject(error);
     }
 );  
+
+// --- REKLAMACJE (COMPLAINTS) ---
+
+// Dla Klienta: Zgłaszanie nowej reklamacji
+export const submitComplaint = async (complaintData: { parcel_id: number, reason: string, description?: string }) => {
+  const response = await api.post('/client/complaints', complaintData);
+  return response.data;
+};
+
+// Dla Klienta: Pobieranie listy własnych reklamacji
+export const getMyComplaints = async () => {
+  const response = await api.get('/client/complaints');
+  return response.data;
+};
+
+// Dla Pracownika (Dyspozytora/Admina): Pobieranie listy wszystkich reklamacji
+export const getComplaints = async () => {
+  const response = await api.get('/dispatcher/complaints');
+  return response.data;
+};
+
+// Dla Pracownika (Dyspozytora/Admina): Rozpatrywanie reklamacji (Akceptacja/Odrzucenie)
+export const resolveComplaint = async (complaintId: number, status: string) => {
+  const response = await api.patch(`/dispatcher/complaints/${complaintId}/resolve`, { status });
+  return response.data;
+};
 
 export default api;
