@@ -1,3 +1,5 @@
+import datetime
+
 from sqlalchemy import Column, Integer, String, ForeignKey, Float, Boolean, DateTime
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -125,6 +127,9 @@ class Parcel(Base):
     is_cod = Column(Boolean, default=False)
     cod_amount = Column(Float, nullable=True)
 
+    # NOWE POLE: Wartość przedmiotów w paczce 
+    declared_value = Column(Float, nullable=True, default=0.0)
+
 
 # ==========================================
 # WARSTWA 3: AUDYT I LOGISTYKA
@@ -225,3 +230,27 @@ class SavedContact(Base):
     address_id = Column(Integer, ForeignKey("addresses.address_id"), nullable=False) # Podpinamy istniejącą strukturę adresów!
     
     address = relationship("Address")
+
+
+class Complaint(Base):
+    __tablename__ = "complaints"
+
+    complaint_id = Column(Integer, primary_key=True, index=True)
+    parcel_id = Column(Integer, ForeignKey("parcels.parcel_id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.user_id"), nullable=False)  # Kto zgłasza
+    
+    reason = Column(String, nullable=False)  # np. "Uszkodzenie", "Zaginięcie"
+    description = Column(String, nullable=True) # Dłuższy opis od klienta
+    
+    # Status reklamacji: PENDING, ACCEPTED, REJECTED
+    status = Column(String, default="PENDING", nullable=False)
+    
+    # Kwota, którą ostatecznie zwrócimy (wyliczana przy akceptacji: declared_value + calculated_price)
+    refund_amount = Column(Float, nullable=True) 
+    
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    resolved_at = Column(DateTime, nullable=True) # Kiedy pracownik kliknął "Rozpatrz"
+
+    # Relacje, żeby SQLAlchemy mogło łatwo pobierać powiązane obiekty
+    parcel = relationship("Parcel")
+    user = relationship("User")
