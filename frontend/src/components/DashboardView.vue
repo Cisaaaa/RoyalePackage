@@ -14,6 +14,17 @@
           <v-btn variant="text" class="text-white text-capitalize mr-2">Cennik</v-btn>
           <v-btn variant="text" class="text-white text-capitalize mr-4">Pomoc</v-btn>
         </div>
+        
+        <v-btn 
+          color="#E5B338" 
+          variant="text" 
+          @click="openProfileModal" 
+          class="text-capitalize font-weight-bold mr-4"
+        >
+          <v-icon start>mdi-account-cog</v-icon>
+          Mój Profil
+        </v-btn>
+
         <v-btn color="#E5B338" variant="outlined" @click="logout" class="text-capitalize font-weight-bold rounded-lg">
           Wyloguj się
         </v-btn>
@@ -228,6 +239,41 @@
       </v-card>
     </v-dialog>
 
+<v-dialog v-model="dialogProfile" max-width="500px">
+  <v-card class="pa-4" elevation="10" style="background-color: #0F172A; border: 1px solid rgba(229, 179, 56, 0.1); border-radius: 20px;">
+    
+    <v-card-title class="text-h5 font-weight-bold text-white mb-2 d-flex align-center">
+      <v-icon color="#E5B338" size="32" class="mr-3">mdi-account-edit</v-icon>
+      Ustawienia Profilu
+    </v-card-title>
+    
+    <v-card-text>
+      <p class="text-caption text-grey mb-4">
+        Wypełnij tylko te pola, które chcesz zmienić. Puste pozostaną bez zmian.
+      </p>
+      <v-form v-model="isProfileFormValid" @submit.prevent="submitProfileUpdate">
+        
+        <v-text-field v-model="profileForm.first_name" label="Nowe imię" variant="solo-filled" bg-color="#1E293B" color="#E5B338" base-color="transparent" class="mb-2" :rules="validationRules.first_name"></v-text-field>
+        
+        <v-text-field v-model="profileForm.last_name" label="Nowe nazwisko" variant="solo-filled" bg-color="#1E293B" color="#E5B338" base-color="transparent" class="mb-2" :rules="validationRules.last_name"></v-text-field>
+        
+        <v-text-field v-model="profileForm.phone" label="Nowy numer telefonu" variant="solo-filled" bg-color="#1E293B" color="#E5B338" base-color="transparent" class="mb-2" placeholder="123456789" :rules="validationRules.phone"></v-text-field>
+        
+        <v-text-field v-model="profileForm.email" label="Nowy adres e-mail" type="email" variant="solo-filled" bg-color="#1E293B" color="#E5B338" base-color="transparent" class="mb-2" :rules="validationRules.email"></v-text-field>
+        
+        <v-text-field v-model="profileForm.password" label="Nowe hasło" type="password" variant="solo-filled" bg-color="#1E293B" color="#E5B338" base-color="transparent" placeholder="Zostaw puste, aby nie zmieniać" :rules="validationRules.password"></v-text-field>
+        
+      </v-form>
+    </v-card-text>
+
+    <v-card-actions>
+      <v-spacer></v-spacer>
+      <v-btn color="grey-lighten-1" variant="text" @click="closeProfileModal">Anuluj</v-btn>
+      <v-btn color="#E5B338" variant="flat" @click="submitProfileUpdate" :loading="isProfileSaving" :disabled="!isProfileFormValid && Object.values(profileForm).some(v => v)" class="font-weight-bold text-black px-4 rounded-lg">Zapisz</v-btn>
+    </v-card-actions>
+
+  </v-card>
+</v-dialog>
   </v-container>
 </template>
 
@@ -252,6 +298,95 @@ const formKey = ref(0); // Zmienna wymuszająca odświeżenie formularza po zamk
 const dialogContacts = ref(false);
 const myContacts = ref<any[]>([]);
 const isLoadingContacts = ref(false);
+
+
+
+
+
+// Zmienne sterujące widocznoscia i ładowaniem
+
+const dialogProfile = ref(false);
+const isProfileFormValid = ref(false);
+const isProfileSaving = ref(false);
+
+// Reguły walidacji dla pól
+const validationRules = {
+  email: [
+    (v: string | null) => !v || v.includes('@') && v.includes('.') || 'Email musi zawierać @ i domenę',
+  ],
+  phone: [
+    (v: string | null) => !v || /^\d{9}$/.test(v.replace(/\D/g, '')) || 'Numer telefonu musi mieć 9 cyfr',
+  ],
+  first_name: [
+    (v: string | null) => !v || v.trim().length >= 2 || 'Imię musi mieć co najmniej 2 znaki',
+  ],
+  last_name: [
+    (v: string | null) => !v || v.trim().length >= 2 || 'Nazwisko musi mieć co najmniej 2 znaki',
+  ],
+  password: [
+    (v: string | null) => !v || v.length >= 8 || 'Hasło musi mieć co najmniej 8 znaków',
+    (v: string | null) => !v || /[A-Z]/.test(v) || 'Hasło musi zawierać wielką literę',
+    (v: string | null) => !v || /[0-9]/.test(v) || 'Hasło musi zawierać cyfrę',
+  ]
+};
+
+
+// Obiekt przechowujący wpisywane dane
+const profileForm = ref({
+  first_name: null,
+  last_name: null,
+  phone: null,
+  email: null,
+  password: null
+});
+
+// Funkcja otwierająca okienko
+const openProfileModal = () => {
+  // Czyścimy formularz, żeby przy ponownym otwarciu nie było starych wpisów
+  profileForm.value = { first_name: null, last_name: null, phone: null, email: null, password: null };
+  dialogProfile.value = true;
+};
+
+// Funkcja zamykająca okienko
+const closeProfileModal = () => {
+  dialogProfile.value = false;
+};
+
+// Funkcja wysyłająca dane do backendu podpięta pod przycisk Zapisz
+const submitProfileUpdate = async () => {
+  isProfileSaving.value = true;
+  try {
+    // 1. Zabezpieczenie: filtrujemy obiekt, wyrzucając z niego puste wartości (null i '').
+    // Dzięki temu do backendu polecą TYLKO te pola, które klient faktycznie wpisał.
+    const payload = Object.fromEntries(
+      Object.entries(profileForm.value).filter(([_, v]) => v !== null && v !== '')
+    );
+    
+    // 2. Jeśli payload jest pusty (użytkownik kliknął zapisz nic nie wpisując), przerywamy.
+    if (Object.keys(payload).length === 0) {
+        alert("Nie wprowadzono żadnych zmian do zapisania.");
+        isProfileSaving.value = false;
+        return;
+    }
+
+    // 3. Wysyłamy żądanie PATCH na nowy endpoint z backendu
+    await api.patch('/client/profile', payload); 
+    
+    alert('Twój profil został zaktualizowany! (Historia zapisana w bazie audytowej)');
+    closeProfileModal();
+    
+  } catch (error) {
+    console.error("Błąd aktualizacji:", error);
+    const errorMessage = (error as any)?.response?.data?.detail || 'Wystąpił błąd podczas zapisywania zmian w profilu.';
+    alert(errorMessage);
+  } finally {
+    isProfileSaving.value = false;
+  }
+};
+
+
+
+
 
 // --- STAN REKLAMACJI ---
 const complaintDialog = ref(false);
