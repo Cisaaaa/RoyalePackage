@@ -218,3 +218,48 @@ class Complaint(ComplaintBase):
 
     class Config:
         from_attributes = True
+
+
+# Modyfikacja profilu użytkownika 
+class UserProfileUpdate(BaseModel):
+    first_name: Optional[str] = Field(None, max_length=100, description="Nowe imię")
+    last_name: Optional[str] = Field(None, max_length=100, description="Nowe nazwisko")
+    phone: Optional[str] = Field(None, max_length=20, description="Nowy numer telefonu")
+    password: Optional[str] = Field(None, min_length=8, max_length=128, description="Nowe hasło")
+    email: Optional[str] = Field(None, max_length=100, description="Nowy adres email")
+
+# Walidacje dla aktualizacji profilu (nie są wymagane, ale jeśli podane, to muszą być poprawne)
+
+    @field_validator('phone')
+    @classmethod
+    def validate_phone(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return v
+        return normalize_polish_phone(v)
+
+    @field_validator('email')
+    @classmethod
+    def validate_email(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return v
+        if '@' not in v or '.' not in v.split('@')[-1]:
+            raise ValueError('Adres email musi zawierać @ i domenę')
+        return v.lower().strip()
+
+    @field_validator('first_name', 'last_name')
+    @classmethod
+    def validate_names(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return v
+        if len(v.strip()) < 2:
+            raise ValueError('Imię/nazwisko musi mieć co najmniej 2 znaki')
+        return v.strip()
+
+    @field_validator('password')
+    @classmethod
+    def validate_password(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return v
+        if len(v) < 8:
+            raise ValueError('Hasło musi mieć co najmniej 8 znaków')
+        return v
