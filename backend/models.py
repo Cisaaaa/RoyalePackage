@@ -254,3 +254,28 @@ class Complaint(Base):
     # Relacje, żeby SQLAlchemy mogło łatwo pobierać powiązane obiekty
     parcel = relationship("Parcel")
     user = relationship("User")
+
+
+
+class UserAuditLog(Base):
+    __tablename__ = "user_audit_log"
+
+    log_id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, nullable=False)
+
+    old_first_name = Column(String(100), nullable=True)
+    new_first_name = Column(String(100), nullable=True)
+
+    old_last_name = Column(String(100), nullable=True)
+    new_last_name = Column(String(100), nullable=True)
+
+    old_phone = Column(String(20), nullable=True)
+    new_phone = Column(String(20), nullable=True)
+
+    old_email = Column(String(255), nullable=True)
+    new_email = Column(String(255), nullable=True)
+
+    old_password_hash = Column(String(255), nullable=True)
+    new_password_hash = Column(String(255), nullable=True)
+
+    changed_at = Column(DateTime, default=datetime.datetime.utcnow)

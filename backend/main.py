@@ -150,7 +150,48 @@ def setup_triggers():
             FOR EACH ROW
             EXECUTE FUNCTION log_parcel_history();
         """))
-        
+
+        # Trigger zapisu historii zmian profilu klienta
+        db.execute(text("""
+            CREATE OR REPLACE FUNCTION log_user_changes()
+            RETURNS TRIGGER AS $$
+            BEGIN
+                IF OLD.first_name IS DISTINCT FROM NEW.first_name OR
+                   OLD.last_name IS DISTINCT FROM NEW.last_name OR
+                   OLD.email IS DISTINCT FROM NEW.email OR
+                   OLD.phone IS DISTINCT FROM NEW.phone OR
+                   OLD.password_hash IS DISTINCT FROM NEW.password_hash THEN
+
+                    INSERT INTO user_audit_log (
+                        user_id,
+                        old_first_name, new_first_name,
+                        old_last_name, new_last_name,
+                        old_email, new_email,
+                        old_phone, new_phone,
+                        old_password_hash, new_password_hash,
+                        changed_at
+                    ) VALUES (
+                        OLD.user_id,
+                        OLD.first_name, NEW.first_name,
+                        OLD.last_name, NEW.last_name,
+                        OLD.email, NEW.email,
+                        OLD.phone, NEW.phone,
+                        OLD.password_hash, NEW.password_hash,
+                        NOW()
+                    );
+                END IF;
+
+                RETURN NEW;
+            END;
+            $$ LANGUAGE plpgsql;
+
+            DROP TRIGGER IF EXISTS user_changes_trigger ON users;
+            CREATE TRIGGER user_changes_trigger
+            AFTER UPDATE ON users
+            FOR EACH ROW
+            EXECUTE FUNCTION log_user_changes();
+        """))
+
         db.commit()
         print("SUCCESS: Magia bazy danych (Triggery) działa!")
     except Exception as e:
@@ -1770,3 +1811,53 @@ def resolve_complaint(
 
     db.commit()
     return {"message": f"Reklamacja została {update_data.status.lower()}.", "refund": complaint.refund_amount}
+
+
+# Endpoint modyfikacji profilu klienta
+@app.patch("/api/v1/client/profile", summary="Edytuj mój profil")
+def update_user_profile(
+    profile_data: schemas.UserProfileUpdate,
+    db: Session = Depends(get_db),
+    current_user_email: str = Depends(security.get_current_user_email)
+):
+   # Pobieramy rekord zalogowanego użytkownika w celu wyciągniecia tokenu JWT
+   user =db.query(models.User).filter(models.User.email == current_user_email).first()
+   if not user:
+       raise HTTPException(status_code=404, detail="Nie znaleziono użytkownika")
+   
+   # Zaszyfrowanie hasła, jeśli klient chce je zmienić
+   hashed_password = None
+   if profile_data.password:
+    hashed_password = security.hash_password(profile_data.password)
+
+   # Używamy surowego SQL, żeby móc korzystać z funkcji COALESCE i aktualizować tylko podane pola (reszta pozostaje bez zmian)
+   update_query = text("""
+        UPDATE users 
+        SET 
+            first_name = COALESCE(:first_name, first_name),
+            last_name = COALESCE(:last_name, last_name),
+            phone = COALESCE(:phone, phone),
+            email = COALESCE(:email, email),
+            password_hash = COALESCE(:password_hash, password_hash)
+        WHERE user_id = :user_id 
+    """)
+   
+   # Wykonanie zapytania z przekazaniem nowych danych lub NULL, jeśli pole nie zostało podane
+   try:
+       db.execute(update_query, {
+             "first_name": profile_data.first_name,
+             "last_name": profile_data.last_name,
+             "phone": profile_data.phone,
+             "email": profile_data.email,
+             "password_hash": hashed_password,
+             "user_id": user.user_id
+        })
+       
+       db.commit()
+       return {"message": "Profil zaktualizowany pomyślnie!", "status": "success"}
+   except Exception as e:
+       db.rollback()
+       if "unique constraint" in str(e).lower():
+           raise HTTPException(status_code=400, detail="Adres e-mail już istnieje w systemie.")
+       raise HTTPException(status_code=500, detail=f"Błąd podczas aktualizacji profilu: {str(e)}")
+
