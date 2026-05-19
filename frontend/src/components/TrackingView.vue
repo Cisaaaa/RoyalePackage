@@ -71,6 +71,10 @@
               </div>
             </v-timeline-item>
           </v-timeline>
+          <div class="mt-6">
+            <h3 class="text-white mb-3 font-weight-bold">Lokalizacja kuriera (live)</h3>
+            <div id="tracking-map" class="tracking-map"></div>
+          </div>
         </div>
 
         <div v-else class="text-center py-12 text-grey-darken-1">
@@ -84,30 +88,95 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { ref, onMounted, onBeforeUnmount, nextTick } from 'vue';
 import { useRoute } from 'vue-router';
 import api from '../api/axios';
+import L from 'leaflet';
+import 'leaflet/dist/leaflet.css';
 
 const route = useRoute();
 const searchQuery = ref('');
 const trackingData = ref<any>(null);
 const isLoading = ref(false);
 const errorMsg = ref('');
+const map = ref<L.Map | null>(null);
+const courierMarker = ref<L.Marker | null>(null);
+const ws = ref<WebSocket | null>(null);
 
 const trackParcel = async () => {
   if (!searchQuery.value) return;
   isLoading.value = true;
   errorMsg.value = '';
   trackingData.value = null;
+  courierMarker.value = null;
 
   try {
-    const response = await api.get(`/tracking/${searchQuery.value.trim()}`);
+    const tn = searchQuery.value.trim();
+    const response = await api.get(`/tracking/${tn}`);
     trackingData.value = response.data;
+
+    await initMap();
+    connectTrackingSocket(tn);
   } catch (error: any) {
-    errorMsg.value = error.response?.status === 404 ? 'Nie znaleziono przesyłki o podanym numerze.' : 'Wystąpił błąd serwera.';
+    errorMsg.value = error.response?.status === 404
+      ? 'Nie znaleziono przesyłki o podanym numerze.'
+      : 'Wystąpił błąd serwera.';
   } finally {
     isLoading.value = false;
   }
+};
+
+const initMap = async () => {
+  await nextTick();
+
+  if (map.value) {
+    map.value.remove();
+    map.value = null;
+  }
+
+  map.value = L.map('tracking-map').setView([52.2297, 21.0122], 12);
+
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '&copy; OpenStreetMap contributors'
+  }).addTo(map.value);
+};
+
+const updateCourierMarker = (lat: number, lon: number) => {
+  if (!map.value) return;
+
+  if (!courierMarker.value) {
+    courierMarker.value = L.marker([lat, lon]).addTo(map.value).bindPopup('Kurier');
+  } else {
+    courierMarker.value.setLatLng([lat, lon]);
+  }
+
+  map.value.setView([lat, lon], 14);
+};
+
+const connectTrackingSocket = (trackingNumber: string) => {
+  if (ws.value) {
+    ws.value.close();
+    ws.value = null;
+  }
+
+  const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
+  const socketUrl = `${protocol}://localhost:8000/api/v1/tracking/ws/${trackingNumber}`;
+  ws.value = new WebSocket(socketUrl);
+
+  ws.value.onmessage = (event) => {
+    try {
+      const data = JSON.parse(event.data);
+      const loc = data?.courier_location;
+      if (loc?.latitude != null && loc?.longitude != null) {
+        updateCourierMarker(loc.latitude, loc.longitude);
+      }
+    } catch (e) {
+      console.error('Blad parsowania WS:', e);
+    }
+  };
+
+  ws.value.onerror = (e) => console.error('WS error:', e);
+  ws.value.onclose = () => console.log('WS closed');
 };
 
 onMounted(() => {
@@ -116,6 +185,11 @@ onMounted(() => {
     searchQuery.value = route.params.number as string;
     trackParcel();
   }
+});
+
+onBeforeUnmount(() => {
+  if (ws.value) ws.value.close();
+  if (map.value) map.value.remove();
 });
 
 const getStatusColor = (status: string) => {
@@ -144,4 +218,10 @@ const formatTime = (dateString: string) => {
 .text-gold { color: #E5B338 !important; }
 .custom-input :deep(.v-field) { border-radius: 12px; }
 .custom-input :deep(.v-field__input) { color: white !important; font-weight: bold; }
+.tracking-map {
+  width: 100%;
+  height: 360px;
+  border-radius: 12px;
+  overflow: hidden;
+}
 </style>

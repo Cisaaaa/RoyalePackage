@@ -137,7 +137,31 @@ onMounted(async () => {
 
       const ws = new WebSocket(`ws://localhost:8000/api/v1/courier/ws/${token}`);
       
-      ws.onopen = () => console.log("Połączono z bazą przez WebSocket!");
+      ws.onopen = () => {
+        console.log("Połączono z bazą przez WebSocket!");
+
+        let id;
+        let options;
+
+        function success(pos) {
+          const crd = pos.coords;
+            // Pozycja kuriera leci do konsoli
+            console.log("RADAR KURIERA: ", crd.latitude, crd.longitude);
+            ws.send(JSON.stringify({ latitude: crd.latitude, longitude: crd.longitude }));
+          }
+
+        function error(err) {
+          console.error(`ERROR(${err.code}): ${err.message}`);
+        }
+
+        options = {
+          enableHighAccuracy: false,
+          timeout: 15000,
+          maximumAge: 0,
+        };
+
+        id = navigator.geolocation.watchPosition(success, error, options);
+      }
       
       ws.onmessage = async (event) => {
           if (event.data === "ROUTE_UPDATED") {
