@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text, func
 import random
 import asyncio
+import json
 from datetime import datetime, timezone
 
 import requests
@@ -226,6 +227,8 @@ def get_current_admin(current_user_email: str = Depends(security.get_current_use
 class ConnectionManager:
     def __init__(self):
         self.active_connections: dict[int, WebSocket] = {}
+        self.courier_locations: dict[int, dict] = {} # kurier_id -> lat oraz lon
+        self.tracking_subscriptions: dict[str, set] = {} # tracking_number
 
     async def connect(self, websocket: WebSocket, courier_id: int):
         await websocket.accept()
@@ -242,6 +245,29 @@ class ConnectionManager:
         websocket = self.active_connections.get(courier_id)
         if websocket:
             await websocket.send_text(message)
+
+    def store_courier_location(self, courier_id: int, latitude: float, longitude: float):
+        # przechowujemy ostatnia pozycje kuriera
+        self.courier_locations[courier_id] = {"latitude": latitude, "longitude": longitude}
+
+    async def subscribe_to_tracking(self, tracking_number: str, websocket: WebSocket):
+        if tracking_number not in self.tracking_subscriptions:
+            self.tracking_subscriptions[tracking_number] = set()
+        self.tracking_subscriptions[tracking_number].add(websocket)
+
+    def unsubscribe_from_tracking(self, tracking_number: str, websocket: WebSocket):
+        if tracking_number in self.tracking_subscriptions:
+            self.tracking_subscriptions[tracking_number].discard(websocket)
+            if not self.tracking_subscriptions[tracking_number]:
+                del self.tracking_subscriptions[tracking_number]
+
+    async def broadcast_to_tracking(self, tracking_number: str, message: str):
+        if tracking_number in self.tracking_subscriptions:
+            for ws in self.tracking_subscriptions[tracking_number]:
+                try:
+                    await ws.send_text(message)
+                except Exception as e:
+                    print(f"Blad wysylania: {e}")
 
 manager = ConnectionManager()
 
@@ -1088,6 +1114,45 @@ async def courier_websocket(websocket: WebSocket, token: str, db: Session = Depe
         try:
             while True:
                 data = await websocket.receive_text()
+                try:
+                    payload = json.loads(data)
+                    latitude = payload.get("latitude")
+                    longitude = payload.get("longitude")
+                    if latitude is None and longitude is None:
+                        continue
+
+                    # zapisujemy lokalizacje kuriera
+                    manager.store_courier_location(user.user_id, latitude, longitude)
+                    print(f"Lokalizacja: Kuriera {user.user_id}, lat: {latitude}, lon: {longitude}")
+
+                    # szukamy aktywnej trasy kuriera
+                    route = db.query(models.Route).filter(
+                        models.Route.courier_id == user.user_id,
+                        models.Route.status == "IN_PROGRESS"
+                    ).first()
+                    if not route:
+                        continue
+
+                    sql = text("""
+                        SELECT p.tracking_number
+                        FROM route_stops rs
+                        JOIN parcels p ON rs.parcel_id = p.parcel_id
+                        WHERE rs.route_id = :route_id
+                    """)
+                    rows = db.execute(sql, {"route_id": route.route_id}).fetchall()
+
+                    msg = json.dumps({
+                        "courier_location": {"latitude": latitude, "longitude": longitude},
+                    })
+
+                    for row in rows:
+                        tracking_number = row["tracking_number"] if hasattr(row, "__contains__") and "tracking_number" in row else row[0]
+                        await manager.broadcast_to_tracking(tracking_number, msg)
+                except json.JSONDecodeError:
+                    print("Otrzymano niepoprawny JSON od kuriera.")
+                except Exception as e:
+                    print(f"Blad przetwarzania lokalizacji kuriera: {e}")
+
         except WebSocketDisconnect:
             manager.disconnect(user.user_id, websocket)
             
@@ -1861,3 +1926,20 @@ def update_user_profile(
            raise HTTPException(status_code=400, detail="Adres e-mail już istnieje w systemie.")
        raise HTTPException(status_code=500, detail=f"Błąd podczas aktualizacji profilu: {str(e)}")
 
+@app.websocket("/api/v1/tracking/ws/{tracking_number}")
+async def tracking_websocket(websocket: WebSocket, tracking_number: str, db: Session = Depends(get_db)):
+    parcel = db.query(models.Parcel).filter(models.Parcel.tracking_number == tracking_number).first()
+    if not parcel:
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        return
+
+    await websocket.accept()
+    await manager.subscribe_to_tracking(tracking_number, websocket)
+    print(f"INFO: Klient podlaczyl sie do sledzenia {tracking_number}")
+
+    try:
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        manager.unsubscribe_from_tracking(tracking_number, websocket)
+        print(f"INFO: Klient odlaczyl sie od sledzenia {tracking_number}")
