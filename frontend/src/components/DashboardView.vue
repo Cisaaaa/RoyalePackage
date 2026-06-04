@@ -9,12 +9,6 @@
           <span class="text-gold text-caption" style="font-size: 0.6rem !important;">TWÓJ KURIER PREMIUM</span>
         </div>
         <v-spacer></v-spacer>
-        <div class="d-none d-md-flex align-center">
-          <v-btn variant="text" class="text-white text-capitalize mr-2">Śledzenie</v-btn>
-          <v-btn variant="text" class="text-white text-capitalize mr-2">Cennik</v-btn>
-          <v-btn variant="text" class="text-white text-capitalize mr-4">Pomoc</v-btn>
-        </div>
-        
         <v-btn 
           color="#E5B338" 
           variant="text" 
