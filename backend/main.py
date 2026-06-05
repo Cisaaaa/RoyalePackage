@@ -2,6 +2,7 @@ import os
 from fastapi import FastAPI, Depends, HTTPException, status, WebSocket, WebSocketDisconnect, BackgroundTasks
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 import schemas
 import security
 from fastapi.middleware.cors import CORSMiddleware
@@ -191,6 +192,37 @@ def setup_triggers():
             AFTER UPDATE ON users
             FOR EACH ROW
             EXECUTE FUNCTION log_user_changes();
+        """))
+
+        # Procedura RAW SQL do dodawania pojazdu (bez zmiany logiki biznesowej endpointu)
+        db.execute(text("""
+            CREATE OR REPLACE PROCEDURE sp_create_vehicle(
+                p_registration_number TEXT,
+                p_capacity_kg DOUBLE PRECISION,
+                p_capacity_m3 DOUBLE PRECISION,
+                p_vehicle_type TEXT,
+                p_warehouse_id INTEGER
+            )
+            LANGUAGE plpgsql
+            AS $$
+            BEGIN
+                INSERT INTO vehicles (
+                    registration_number,
+                    capacity_kg,
+                    capacity_m3,
+                    status,
+                    vehicle_type,
+                    warehouse_id
+                ) VALUES (
+                    p_registration_number,
+                    p_capacity_kg,
+                    p_capacity_m3,
+                    'ACTIVE',
+                    p_vehicle_type,
+                    p_warehouse_id
+                );
+            END;
+            $$;
         """))
 
         db.commit()
@@ -577,27 +609,46 @@ def get_user_parcels(
     db: Session = Depends(get_db),
     current_user_email: str = Depends(security.get_current_user_email)
 ):
-    # 1. Identyfikujemy zalogowanego użytkownika (bez zmian)
-    current_user = db.query(models.User).filter(models.User.email == current_user_email).first()
-    if not current_user:
+    # 1. Identyfikujemy zalogowanego użytkownika (RAW SQL)
+    user_row = db.execute(
+        text("""
+            SELECT user_id
+            FROM users
+            WHERE email = :email
+            LIMIT 1
+        """),
+        {"email": current_user_email}
+    ).fetchone()
+
+    if not user_row:
         raise HTTPException(status_code=404, detail="Nie znaleziono użytkownika")
-    
-    # 2. Zmieniamy zapytanie: prosimy o paczkę ORAZ nazwę statusu.
-    # .join łączy tabelę Parcel z tabelą Status tam, gdzie zgadzają się ID statusów.
-    results = db.query(models.Parcel, models.Status.status_name).join(
-        models.Status, models.Parcel.status_id == models.Status.status_id
-    ).filter(models.Parcel.sender_id == current_user.user_id).all()
+
+    # 2. Pobieramy paczki z nazwą statusu (RAW SQL)
+    rows = db.execute(
+        text("""
+            SELECT
+                p.parcel_id,
+                p.tracking_number,
+                p.status_id,
+                p.calculated_price,
+                s.status_name
+            FROM parcels p
+            JOIN statuses s ON s.status_id = p.status_id
+            WHERE p.sender_id = :sender_id
+        """),
+        {"sender_id": user_row[0]}
+    ).fetchall()
     
     # 3. Ponieważ wynik z JOINa to lista krotek (parcel, status_name), 
     # musimy je "przepakować" do formatu, który rozumie schemat ParcelResponse.
     response = []
-    for parcel, status_name in results:
+    for row in rows:
         response.append({
-            "parcel_id": parcel.parcel_id,
-            "tracking_number": parcel.tracking_number,
-            "status_id": parcel.status_id,
-            "calculated_price": parcel.calculated_price,
-            "status_name": status_name  # Przekazujemy tekstową nazwę do frontendu
+            "parcel_id": row[0],
+            "tracking_number": row[1],
+            "status_id": row[2],
+            "calculated_price": row[3],
+            "status_name": row[4]  # Przekazujemy tekstową nazwę do frontendu
         })
     
     return response
@@ -707,39 +758,55 @@ def get_unassigned_parcels(
     db: Session = Depends(get_db),
     current_user_email: str = Depends(security.get_current_user_email)
 ):
-    # 1. Sprawdzamy uprawnienia (Tylko Dyspozytor - rola 3)
-    user = db.query(models.User).filter(models.User.email == current_user_email).first()
-    if not user or user.role_id != 3:
+    # 1. Sprawdzamy uprawnienia (Tylko Dyspozytor - rola 3) przez RAW SQL
+    user_row = db.execute(
+        text("""
+            SELECT user_id, role_id, warehouse_id
+            FROM users
+            WHERE email = :email
+            LIMIT 1
+        """),
+        {"email": current_user_email}
+    ).fetchone()
+
+    if not user_row or user_row[1] != 3:
         raise HTTPException(status_code=403, detail="Brak uprawnień. Widok tylko dla Dyspozytora.")
 
-    # 2. Szukamy paczek ze statusem 2 ("W magazynie nadawczym") ORAZ 4 ("W magazynie docelowym")
-    unassigned_parcels = db.query(models.Parcel).outerjoin(
-        models.RouteStop, models.Parcel.parcel_id == models.RouteStop.parcel_id
-    ).filter(
-        models.Parcel.status_id.in_([2, 4]), # <--- KLUCZOWA ZMIANA: .in_([2, 4]) zamiast == 2
-        models.Parcel.current_warehouse_id == user.warehouse_id,
-        models.RouteStop.stop_id == None
-    ).all()
+    # 2. Szukamy paczek nieprzypisanych trasie (RAW SQL)
+    rows = db.execute(
+        text("""
+            SELECT
+                p.parcel_id,
+                p.tracking_number,
+                a.city,
+                a.street,
+                p.recipient_custom_name,
+                p.calculated_price,
+                p.target_region_id,
+                s.status_name
+            FROM parcels p
+            LEFT JOIN route_stops rs ON rs.parcel_id = p.parcel_id
+            LEFT JOIN addresses a ON a.address_id = p.recipient_address_id
+            LEFT JOIN statuses s ON s.status_id = p.status_id
+            WHERE p.status_id IN (2, 4)
+              AND p.current_warehouse_id = :warehouse_id
+              AND rs.stop_id IS NULL
+        """),
+        {"warehouse_id": user_row[2]}
+    ).fetchall()
 
     # 3. Składamy dane dla widoku tabeli na frontendzie
     results = []
-    results = []
-    for parcel in unassigned_parcels:
-        address = db.query(models.Address).filter(models.Address.address_id == parcel.recipient_address_id).first()
-        
-        # Pobieramy też nazwę statusu do wyświetlenia w tabeli
-        status_obj = db.query(models.Status).filter(models.Status.status_id == parcel.status_id).first()
-        
+    for row in rows:
         results.append({
-            "parcel_id": parcel.parcel_id,
-            "tracking_number": parcel.tracking_number,
-            "recipient_city": address.city if address else "Brak danych",
-            "recipient_street": address.street if address else "Brak danych",
-            "recipient_name": parcel.recipient_custom_name,
-            "calculated_price": parcel.calculated_price,
-            
-            "target_region_id": parcel.target_region_id, 
-            "status_name": status_obj.status_name if status_obj else "Nieznany"
+            "parcel_id": row[0],
+            "tracking_number": row[1],
+            "recipient_city": row[2] if row[2] else "Brak danych",
+            "recipient_street": row[3] if row[3] else "Brak danych",
+            "recipient_name": row[4],
+            "calculated_price": row[5],
+            "target_region_id": row[6],
+            "status_name": row[7] if row[7] else "Nieznany"
         })
     return results
 
@@ -1370,40 +1437,66 @@ def get_route_reports(
     db: Session = Depends(get_db),
     current_user_email: str = Depends(security.get_current_user_email)
 ):
-    user = db.query(models.User).filter(models.User.email == current_user_email).first()
-    if not user or user.role_id != 3:
+    user_row = db.execute(
+        text("""
+            SELECT role_id
+            FROM users
+            WHERE email = :email
+            LIMIT 1
+        """),
+        {"email": current_user_email}
+    ).fetchone()
+
+    if not user_row or user_row[0] != 3:
         raise HTTPException(status_code=403, detail="Brak uprawnień.")
 
-    # Pobieramy tylko trasy, które mają policzone kilometry
-    routes = db.query(models.Route).filter(models.Route.total_distance_km != None).order_by(models.Route.route_id.desc()).all()
-    
+    rows = db.execute(
+        text("""
+            SELECT
+                r.route_id,
+                u.first_name,
+                u.last_name,
+                v.registration_number,
+                r.total_distance_km,
+                r.total_revenue,
+                r.route_cost,
+                COUNT(CASE WHEN rs.operation_type = 'DROP_OFF' THEN 1 END) AS parcels_delivered
+            FROM routes r
+            LEFT JOIN users u ON u.user_id = r.courier_id
+            LEFT JOIN vehicles v ON v.vehicle_id = r.vehicle_id
+            LEFT JOIN route_stops rs ON rs.route_id = r.route_id
+            WHERE r.total_distance_km IS NOT NULL
+            GROUP BY
+                r.route_id,
+                u.first_name,
+                u.last_name,
+                v.registration_number,
+                r.total_distance_km,
+                r.total_revenue,
+                r.route_cost
+            ORDER BY r.route_id DESC
+        """)
+    ).fetchall()
+
     reports = []
-    for r in routes:
-        # Szukamy imienia kuriera
-        courier = db.query(models.User).filter(models.User.user_id == r.courier_id).first()
-        courier_name = f"{courier.first_name} {courier.last_name}" if courier else "Nieznany Kurier"
-        
-        # Szukamy rejestracji pojazdu
-        vehicle = db.query(models.Vehicle).filter(models.Vehicle.vehicle_id == r.vehicle_id).first()
-        vehicle_reg = vehicle.registration_number if vehicle else "Brak Danych"
-        
-        # Liczymy ile paczek przypisano do tej trasy
-        parcels_count = db.query(models.RouteStop).filter(
-            models.RouteStop.route_id == r.route_id,
-            models.RouteStop.operation_type == "DROP_OFF"
-        ).count()
+    for row in rows:
+        first_name = row[1]
+        last_name = row[2]
+        courier_name = f"{first_name} {last_name}" if first_name and last_name else "Nieznany Kurier"
+        vehicle_reg = row[3] if row[3] else "Brak Danych"
+        parcels_count = row[7] if row[7] is not None else 0
 
         reports.append({
-            "route_id": r.route_id,
+            "route_id": row[0],
             "courier_name": courier_name,
             "vehicle_registration": vehicle_reg,
-            "total_distance_km": round(r.total_distance_km, 2),
-            "total_revenue": round(r.total_revenue, 2),
-            "route_cost": round(r.route_cost, 2),
-            "net_profit": round(r.total_revenue - r.route_cost, 2), # Czysty zysk
+            "total_distance_km": round(row[4], 2),
+            "total_revenue": round(row[5], 2),
+            "route_cost": round(row[6], 2),
+            "net_profit": round(row[5] - row[6], 2),
             "parcels_delivered": parcels_count
         })
-        
+
     return reports
 
 # PUBLICZNY SYSTEM ŚLEDZENIA (TRACKING)
@@ -1461,21 +1554,33 @@ def get_all_employees(admin: models.User = Depends(get_current_admin), db: Sessi
     """
     Pobiera wszystkich dyspozytorów i kurierów (role_id > 1) wraz z ich przypisaniem do magazynu.
     """
-    # Używamy złączenia (JOIN), żeby od razu pobrać nazwę magazynu, w którym pracują
-    results = db.query(models.User, models.Warehouse.name).outerjoin(
-        models.Warehouse, models.User.warehouse_id == models.Warehouse.warehouse_id
-    ).filter(models.User.role_id.in_([2, 3, 4, 5])).all()
+    # Używamy złączenia (JOIN), żeby od razu pobrać nazwę magazynu, w którym pracują (RAW SQL)
+    rows = db.execute(
+        text("""
+            SELECT
+                u.user_id,
+                u.first_name,
+                u.last_name,
+                u.email,
+                u.role_id,
+                u.is_active,
+                w.name AS warehouse_name
+            FROM users u
+            LEFT JOIN warehouses w ON w.warehouse_id = u.warehouse_id
+            WHERE u.role_id IN (2, 3, 4, 5)
+        """),
+    ).fetchall()
     
     employees = []
-    for user, warehouse_name in results:
+    for row in rows:
         employees.append({
-            "user_id": user.user_id,
-            "first_name": user.first_name,
-            "last_name": user.last_name,
-            "email": user.email,
-            "role_id": user.role_id,
-            "warehouse_name": warehouse_name if warehouse_name else "Centrala (Brak HUBu)",
-            "is_active": user.is_active
+            "user_id": row[0],
+            "first_name": row[1],
+            "last_name": row[2],
+            "email": row[3],
+            "role_id": row[4],
+            "warehouse_name": row[6] if row[6] else "Centrala (Brak HUBu)",
+            "is_active": row[5]
         })
     return employees
 
@@ -1519,20 +1624,31 @@ def get_all_vehicles(admin: models.User = Depends(get_current_admin), db: Sessio
     """
     Pobiera wszystkie pojazdy w firmie wraz z przypisanymi do nich magazynami.
     """
-    results = db.query(models.Vehicle, models.Warehouse.name).outerjoin(
-        models.Warehouse, models.Vehicle.warehouse_id == models.Warehouse.warehouse_id
-    ).all()
+    rows = db.execute(
+        text("""
+            SELECT
+                v.vehicle_id,
+                v.registration_number,
+                v.capacity_kg,
+                v.capacity_m3,
+                v.status,
+                v.vehicle_type,
+                w.name AS warehouse_name
+            FROM vehicles v
+            LEFT JOIN warehouses w ON w.warehouse_id = v.warehouse_id
+        """),
+    ).fetchall()
     
     vehicles = []
-    for vehicle, warehouse_name in results:
+    for row in rows:
         vehicles.append({
-            "vehicle_id": vehicle.vehicle_id,
-            "registration_number": vehicle.registration_number,
-            "capacity_kg": vehicle.capacity_kg,
-            "capacity_m3": vehicle.capacity_m3,
-            "status": vehicle.status,
-            "vehicle_type": vehicle.vehicle_type,
-            "warehouse_name": warehouse_name if warehouse_name else "Nieprzypisany"
+            "vehicle_id": row[0],
+            "registration_number": row[1],
+            "capacity_kg": row[2],
+            "capacity_m3": row[3],
+            "status": row[4],
+            "vehicle_type": row[5],
+            "warehouse_name": row[6] if row[6] else "Nieprzypisany"
         })
     return vehicles
 
@@ -1556,17 +1672,35 @@ def create_vehicle(
     if vehicle_type not in ["VAN", "TRUCK"]:
         raise HTTPException(status_code=400, detail="Dozwolone typy pojazdów to VAN lub TRUCK.")
 
-    new_vehicle = models.Vehicle(
-        registration_number=registration_number,
-        capacity_kg=capacity_kg,
-        capacity_m3=capacity_m3,
-        status="ACTIVE",
-        vehicle_type=vehicle_type,
-        warehouse_id=warehouse_id
-    )
-    
-    db.add(new_vehicle)
-    db.commit()
+    # Jawna transakcja SQL + wywołanie procedury RAW SQL
+    with engine.connect() as conn:
+        try:
+            conn.exec_driver_sql("START TRANSACTION")
+            conn.execute(
+                text("""
+                    CALL sp_create_vehicle(
+                        :registration_number,
+                        :capacity_kg,
+                        :capacity_m3,
+                        :vehicle_type,
+                        :warehouse_id
+                    )
+                """),
+                {
+                    "registration_number": registration_number,
+                    "capacity_kg": capacity_kg,
+                    "capacity_m3": capacity_m3,
+                    "vehicle_type": vehicle_type,
+                    "warehouse_id": warehouse_id
+                }
+            )
+            conn.exec_driver_sql("COMMIT")
+        except IntegrityError:
+            conn.exec_driver_sql("ROLLBACK")
+            raise HTTPException(status_code=400, detail="Nie udało się dodać pojazdu. Sprawdź unikalność numeru rejestracyjnego i poprawność danych.")
+        except Exception:
+            conn.exec_driver_sql("ROLLBACK")
+            raise
     
     return {"message": f"Pojazd {registration_number} dodany do floty!"}
 
@@ -1739,28 +1873,53 @@ def get_parcel_label(parcel_id: int, db: Session = Depends(get_db), current_user
 
 @app.get("/api/v1/contacts", summary="Pobierz książkę adresową klienta")
 def get_contacts(current_user_email: str = Depends(security.get_current_user_email), db: Session = Depends(get_db)):
-    user = db.query(models.User).filter(models.User.email == current_user_email).first()
-    contacts = db.query(models.SavedContact).filter(models.SavedContact.user_id == user.user_id).all()
-    
+    user_row = db.execute(
+        text("""
+            SELECT user_id
+            FROM users
+            WHERE email = :email
+            LIMIT 1
+        """),
+        {"email": current_user_email}
+    ).fetchone()
+
+    if not user_row:
+        raise HTTPException(status_code=404, detail="Nie znaleziono użytkownika")
+
+    rows = db.execute(
+        text("""
+            SELECT
+                c.contact_id,
+                c.first_name,
+                c.last_name,
+                c.phone,
+                a.street,
+                a.building_number,
+                a.city,
+                a.postal_code,
+                ST_Y(a.geom) AS lat,
+                ST_X(a.geom) AS lon
+            FROM saved_contacts c
+            JOIN addresses a ON a.address_id = c.address_id
+            WHERE c.user_id = :user_id
+        """),
+        {"user_id": user_row[0]}
+    ).fetchall()
+
     results = []
-    # Pobieramy koordynaty z PostGIS za pomocą bezpiecznego SQLa
-    sql_coords = text("SELECT ST_X(geom) as lon, ST_Y(geom) as lat FROM addresses WHERE address_id = :id AND geom IS NOT NULL")
-    for c in contacts:
-        coords = db.execute(sql_coords, {"id": c.address_id}).fetchone()
-        lat, lon = (coords[1], coords[0]) if coords else (None, None)
-        
+    for row in rows:
         results.append({
-            "contact_id": c.contact_id,
-            "first_name": c.first_name,
-            "last_name": c.last_name,
-            "phone": c.phone,
+            "contact_id": row[0],
+            "first_name": row[1],
+            "last_name": row[2],
+            "phone": row[3],
             "address": {
-                "street": c.address.street,
-                "building_number": c.address.building_number,
-                "city": c.address.city,
-                "postal_code": c.address.postal_code,
-                "lat": lat,
-                "lon": lon
+                "street": row[4],
+                "building_number": row[5],
+                "city": row[6],
+                "postal_code": row[7],
+                "lat": row[8],
+                "lon": row[9]
             }
         })
     return results

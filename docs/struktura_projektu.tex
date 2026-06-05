@@ -1,0 +1,46 @@
+\begin{figure}[H]
+\centering
+\begin{minipage}{0.95\textwidth}
+\begin{lstlisting}[basicstyle=\ttfamily\scriptsize, frame=single, caption={Struktura projektu RoyalePackage}, label={lst:struktura-projektu}, breaklines=true, breakatwhitespace=true, columns=fullflexible, keepspaces=true, showstringspaces=false]
+ROYALEPACKAGE/
+|-- backend/                  % Backend aplikacji i logika API
+|   |-- __pycache__/          % Pliki cache Pythona
+|   |-- alembic/              % Migracje bazy danych
+|   |-- venv/                 % Lokalne srodowisko Pythona
+|   |-- alembic.ini           % Konfiguracja Alembica
+|   |-- database.py           % Polaczenie z baza i sesje SQLAlchemy
+|   |-- Dockerfile            % Obraz Dockera dla backendu
+|   |-- email_utils.py        % Funkcje do wysylania e-maili
+|   |-- main.py               % Glowna aplikacja FastAPI
+|   |-- models.py             % Modele ORM: tabele, kolumny, relacje
+|   |-- requirements.txt      % Zaleznosci Pythona
+|   |-- schemas.py            % Schematy Pydantic do walidacji danych
+|   |-- security.py           % JWT, hasla i autoryzacja
+|
+|-- frontend/                 % Interfejs uzytkownika
+|   |-- dist/                 % Zbudowana wersja aplikacji frontendowej
+|   |-- node_modules/         % Zainstalowane zaleznosci Node.js
+|   |-- src/
+|   |   |-- api/
+|   |   |   |-- axios.ts      % Konfiguracja klienta HTTP dla API
+|   |   |-- components/       % Komponenty widokow i paneli
+|   |   |-- router/           % Definicja tras Vue Router
+|   |   |-- App.vue           % Glowne drzewo komponentow aplikacji
+|   |   |-- env.d.ts          % Definicje typow dla zasobow Vite/Vue
+|   |   |-- main.ts           % Punkt startowy aplikacji
+|   |-- Dockerfile            % Obraz Dockera dla frontendu
+|   |-- index.html            % Glowny plik HTML aplikacji
+|   |-- package-lock.json     % Zablokowane wersje npm
+|   |-- package.json          % Skrypty i zaleznosci frontendowe
+|   |-- tsconfig.json         % Konfiguracja TypeScript
+|   |-- vite.config.ts        % Konfiguracja bundlera Vite
+|
+|-- .env                      % Zmienne srodowiskowe lokalne
+|-- .env_example              % Przykladowy plik konfiguracji srodowiskowej
+|-- .gitignore                % Lista plikow ignorowanych przez Git
+|-- README.md                 % Opis projektu i instrukcja uruchomienia
+|-- docker-compose.yml        % Uruchomienie calego stosu w Dockerze
+|-- vroom_config.yml          % Konfiguracja silnika trasowania VROOM
+\end{lstlisting}
+\end{minipage}
+\end{figure}
