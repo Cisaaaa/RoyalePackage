@@ -2,6 +2,7 @@ import os
 from fastapi import FastAPI, Depends, HTTPException, status, WebSocket, WebSocketDisconnect, BackgroundTasks
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 import schemas
 import security
 from fastapi.middleware.cors import CORSMiddleware
@@ -191,6 +192,37 @@ def setup_triggers():
             AFTER UPDATE ON users
             FOR EACH ROW
             EXECUTE FUNCTION log_user_changes();
+        """))
+
+        # Procedura RAW SQL do dodawania pojazdu (bez zmiany logiki biznesowej endpointu)
+        db.execute(text("""
+            CREATE OR REPLACE PROCEDURE sp_create_vehicle(
+                p_registration_number TEXT,
+                p_capacity_kg DOUBLE PRECISION,
+                p_capacity_m3 DOUBLE PRECISION,
+                p_vehicle_type TEXT,
+                p_warehouse_id INTEGER
+            )
+            LANGUAGE plpgsql
+            AS $$
+            BEGIN
+                INSERT INTO vehicles (
+                    registration_number,
+                    capacity_kg,
+                    capacity_m3,
+                    status,
+                    vehicle_type,
+                    warehouse_id
+                ) VALUES (
+                    p_registration_number,
+                    p_capacity_kg,
+                    p_capacity_m3,
+                    'ACTIVE',
+                    p_vehicle_type,
+                    p_warehouse_id
+                );
+            END;
+            $$;
         """))
 
         db.commit()
@@ -1556,17 +1588,35 @@ def create_vehicle(
     if vehicle_type not in ["VAN", "TRUCK"]:
         raise HTTPException(status_code=400, detail="Dozwolone typy pojazdów to VAN lub TRUCK.")
 
-    new_vehicle = models.Vehicle(
-        registration_number=registration_number,
-        capacity_kg=capacity_kg,
-        capacity_m3=capacity_m3,
-        status="ACTIVE",
-        vehicle_type=vehicle_type,
-        warehouse_id=warehouse_id
-    )
-    
-    db.add(new_vehicle)
-    db.commit()
+    # Jawna transakcja SQL + wywołanie procedury RAW SQL
+    with engine.connect() as conn:
+        try:
+            conn.exec_driver_sql("START TRANSACTION")
+            conn.execute(
+                text("""
+                    CALL sp_create_vehicle(
+                        :registration_number,
+                        :capacity_kg,
+                        :capacity_m3,
+                        :vehicle_type,
+                        :warehouse_id
+                    )
+                """),
+                {
+                    "registration_number": registration_number,
+                    "capacity_kg": capacity_kg,
+                    "capacity_m3": capacity_m3,
+                    "vehicle_type": vehicle_type,
+                    "warehouse_id": warehouse_id
+                }
+            )
+            conn.exec_driver_sql("COMMIT")
+        except IntegrityError:
+            conn.exec_driver_sql("ROLLBACK")
+            raise HTTPException(status_code=400, detail="Nie udało się dodać pojazdu. Sprawdź unikalność numeru rejestracyjnego i poprawność danych.")
+        except Exception:
+            conn.exec_driver_sql("ROLLBACK")
+            raise
     
     return {"message": f"Pojazd {registration_number} dodany do floty!"}
 
