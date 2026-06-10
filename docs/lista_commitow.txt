@@ -1,0 +1,103 @@
+2a85c19 - Dominik Chrobak, 5 days ago : Merge pull request #30 from Cisaaaa/feat/poprawki
+6b4ab03 - Dominik Chrobak, 5 days ago : Zmiana orm na raw sql
+20073c0 - Dominik Chrobak, 5 days ago : Dodanie procedury i transackji
+8592523 - Kacper Cisowski, 6 days ago : fix: Poprawa naglowka w dashboardzie
+7413b1a - Kacper Cisowski, 3 weeks ago : Merge pull request #29 from Cisaaaa/feat/live-tracking
+a653716 - Kacper Cisowski, 3 weeks ago : feat: live tracking pozycji kuriera poprzez lokalizację kuriera przy pomocy watch-position
+6c71eda - Dominik Chrobak, 3 weeks ago : Merge pull request #28 from Cisaaaa/feature/profile-modification
+ead510f - Dominik Chrobak, 3 weeks ago : feat: dodano dialog z polami do zmiany danych klienta oraz walidatory w formularzu profilu i blokadę przycisku Zapisz gdy niepoprawne
+1f89154 - Dominik Chrobak, 3 weeks ago : feat: dodano walidatory UserProfileUpdate (telefon, email, imię/nazwisko, hasło)
+e73a705 - Dominik Chrobak, 3 weeks ago : feat: dodano model UserAuditLog i trigger log_user_changes() oraz endpoint do obsługi aktualizacji danych
+17ce4cc - Dominik Chrobak, 4 weeks ago : Merge pull request #27 from Cisaaaa/feature/complaints-handling
+ceb8d2b - Dominik Chrobak, 4 weeks ago : feat: dodanie formularzy zgłoszeniowych i panelu rozpatrywania
+d2881dc - Dominik Chrobak, 4 weeks ago : feat: integracja funkcji API dla modułu reklamacji
+a9193cc - Dominik Chrobak, 4 weeks ago : feat: implementacja endpointów do obsługi reklamacji
+8a3882b - Dominik Chrobak, 4 weeks ago : feat: dodanie modelu Complaint i zadeklarowanej wartości paczki
+05aa2ed - Kacper Cisowski, 5 weeks ago : Merge pull request #26 from Cisaaaa/feat/Label-AddressBook
+135343a - Kacper Cisowski, 5 weeks ago : feat: Generowanie etykiety oraz ksiazka adresowa
+c304cbe - Dominik Chrobak, 5 weeks ago : Merge pull request #25 from Cisaaaa/feature/email-notifications
+7bbe449 - Dominik Chrobak, 5 weeks ago : feat: integracja powiadomień e-mail (BackgroundTasks) przy zmianach statusu przesyłki (VROOM, Line-Haul, Doręczenie)
+ad1f6f6 - Dominik Chrobak, 5 weeks ago : feat: dodanie biblioteki fastapi-mail, konfiguracja Mailtrap oraz szablon HTML
+678ccb2 - Kacper Cisowski, 6 weeks ago : Merge pull request #24 from Cisaaaa/feat/super-admin
+b5a9ff9 - Kacper Cisowski, 6 weeks ago : feat: SuperAdmin - zarządzanie flotą, cenniki, edycja, usuwanie, przywracanie
+7db771a - Kacper Cisowski, 6 weeks ago : feat: Podział na kurier/tir, utworzenie super admina i zarządzanie personelem
+80aa7ff - Kacper Cisowski, 6 weeks ago : Merge pull request #23 from Cisaaaa/feat/websocket-tracking
+0479060 - Kacper Cisowski, 6 weeks ago : feat: regionalizacja, utworzenie hubów, poprawa autoseedera
+10a8918 - Kacper Cisowski, 6 weeks ago : feat: Dodanie śledzenia paczek
+c5177a8 - Kacper Cisowski, 6 weeks ago : feat: Aktualizacja Long Poolingu na WebSocket
+3d2fb13 - Dominik Chrobak, 7 weeks ago : Merge pull request #22 from Cisaaaa/feat/vroom-auto-routing-and-warehouses
+332c556 - Dominik Chrobak, 7 weeks ago : fix: naprawa pobierania taryf i mapowania danych dla automatycznego planowania tras
+107f89e - Dominik Chrobak, 7 weeks ago : feat: przebudowa panelu dyspozytora pod automatyczne planowanie VROOM
+dd17bc9 - Dominik Chrobak, 7 weeks ago : fix: naprawda zamykania tras, gdy kurier dostarczy ostatnią paczkę
+e446031 - Dominik Chrobak, 7 weeks ago : feat: integracja silnika VROOM
+7c88342 - Dominik Chrobak, 7 weeks ago : feat: aktualizacja auto-seedingu bazy i dodanie kontenera VROOM do docker-compose
+2216754 - Dominik Chrobak, 7 weeks ago : feat: poprawka pliku migracji i bezpieczna aktualizacja bazy pod VROOM
+d570616 - Dominik Chrobak, 7 weeks ago : Merge pull request #21 from Cisaaaa/feat/advanced-vrp-and-regions
+dbff34f - Dominik Chrobak, 7 weeks ago : feat: wdrożenie systemu zakładek w panelu dyspozytora
+3a57569 - Dominik Chrobak, 7 weeks ago : feat: dodanie komponentu raportów finansowych
+b744114 - Dominik Chrobak, 7 weeks ago : feat: implementacja optymalizacji tras VRP przez OSRM
+c8f1c7d - Dominik Chrobak, 7 weeks ago : feat: dodanie regionalizacji i pól finansowych do tras
+b586f1b - Dominik Chrobak, 8 weeks ago : Merge pull request #20 from Cisaaaa/feat/dispatcher-panel
+eb8ce6b - Dominik Chrobak, 8 weeks ago : fix: naprawa logiki przycisków w CourierMap i widok braku tras
+5cdde30 - Dominik Chrobak, 8 weeks ago : feat: implementacja DispatcherPanel i integracja z Dashboardem
+155fb0f - Dominik Chrobak, 8 weeks ago : feat: dodanie logiki i endpointów dla Panelu Dyspozytora
+11e096f - Kacper Cisowski, 8 weeks ago : Merge pull request #19 from Cisaaaa/feat/address-autocomplete
+fd18e1a - Kacper Cisowski, 8 weeks ago : feat: asynchroniczny long polling
+73d755d - Kacper Cisowski, 8 weeks ago : fix: Poprawa widoku mapy kuriera
+b7c238e - Kacper Cisowski, 8 weeks ago : Merge pull request #18 from Cisaaaa/feat/address-autocomplete
+4ed8440 - Kacper Cisowski, 8 weeks ago : feat: Endpoint Kuriera, Mapa z punktami
+be516d5 - Kacper Cisowski, 8 weeks ago : Merge pull request #17 from Cisaaaa/feat/address-autocomplete
+8defa3f - Kacper Cisowski, 8 weeks ago : feat: google autocomplete, poprawione formularze, integracja PostGIS dla paczek
+3db5704 - Kacper Cisowski, 9 weeks ago : Merge pull request #16 from Cisaaaa/fix/phone-and-payment
+36d7e92 - Kacper Cisowski, 9 weeks ago : feat: Obsługa opłat dodatkowych przy nadawaniu paczek
+5c29403 - Kacper Cisowski, 9 weeks ago : Merge pull request #15 from Cisaaaa/fix/phone-and-payment
+1b82741 - Kacper Cisowski, 9 weeks ago : fix: Poprawa walidacji numeru telefonu oraz obsługi płatności w bazie danych
+a151bd0 - Dominik Chrobak, 9 weeks ago : Merge pull request #14 from Cisaaaa/feat/frontend-integration
+4b0fba4 - Dominik Chrobak, 9 weeks ago : chore: Aktualizacja zależności projektu (dodanie vue-router)
+6726b50 - Dominik Chrobak, 9 weeks ago : feat: Dodanie endpointu GET dla paczek i aktualizacja schematów Pydantic
+e7f5bcf - Dominik Chrobak, 9 weeks ago : feat: Dodanie dynamicznej listy paczek i poprawki nawigacji panelu
+ea42d6e - Dominik Chrobak, 9 weeks ago : feat: Aktualizacja LoginForm o obsługę routera i tryb rejestracji
+6ad3607 - Dominik Chrobak, 9 weeks ago : style: Refaktoryzacja App.vue pod routing i globalny layout
+f4c25c6 - Dominik Chrobak, 9 weeks ago : feat: Implementacja przechwytywaczy Axios i odświeżania tokena JWT
+3cd8673 - Dominik Chrobak, 9 weeks ago : feat: Konfiguracja Vue Router i nowych ścieżek aplikacji
+1c5f7fb - Kacper Cisowski, 9 weeks ago : Merge pull request #13 from Cisaaaa/feature/nadawanie-paczek
+c0ada50 - Kacper Cisowski, 9 weeks ago : poradnik alembic
+3690e2f - Kacper Cisowski, 9 weeks ago : feat: wdrożenie systemu migracji Alembic
+218816e - Kacper Cisowski, 9 weeks ago : feat: utworzenie prawdziwego tokenu JWT (przygotowanie refresh tokena)
+ce86820 - Kacper Cisowski, 9 weeks ago : feat: endpoint nadawania paczek, relacje adresów i generowanie unikalnego numeru
+ef2d48c - Kacper Cisowski, 9 weeks ago : Merge pull request #12 from Cisaaaa/feature/wszechstronna-walidacja
+4cb2c1a - Kacper Cisowski, 9 weeks ago : fix: dodanie brakujących importów
+a2557cd - Kacper Cisowski, 9 weeks ago : Merge pull request #11 from Cisaaaa/feature/wszechstronna-walidacja
+52a98b6 - Kacper Cisowski, 9 weeks ago : feat: kompleksowa walidacja formularzy, limity Pydantic
+6a6c14d - Kacper Cisowski, 10 weeks ago : Merge pull request #10 from Cisaaaa/feat/modele-paczek-i-historia
+0a764e4 - Kacper Cisowski, 10 weeks ago : feat: dodanie triggera dla historii paczek
+8ec0c60 - Kacper Cisowski, 10 weeks ago : feat: rozszerzenie auto-seedingu o statusy, cennik i domyślny magazyn
+c2de629 - Kacper Cisowski, 10 weeks ago : feat: dodanie fundamentów bazy - modele paczek, adresów i słowników
+f127b51 - Dominik Chrobak, 2 months ago : Merge pull request #9 from Cisaaaa/feat/logowanie-i-jwt
+fcd7735 - Dominik Chrobak, 2 months ago : fix: usuniecie pola adresu dostawy z formularza rejestracji
+c3d824c - Dominik Chrobak, 2 months ago : Merge pull request #8 from Cisaaaa/feat/logowanie-i-jwt
+26ec6eb - Dominik Chrobak, 2 months ago : chore: aktualizacja zaleznosci npm (ikony mdi)
+bedf2f7 - Dominik Chrobak, 2 months ago : Merge pull request #7 from Cisaaaa/feat/logowanie-i-jwt
+5b108a6 - Dominik Chrobak, 2 months ago : feat: wdrożenie Premium UI formularza logowania/rejestracji z walidacją oraz panelu głównego
+9133666 - Dominik Chrobak, 2 months ago : chore: konfiguracja Vuetify i ikonek Material Design
+87c47b1 - Dominik Chrobak, 2 months ago : fix(backend): dodanie konfiguracji CORS dla komunikacji z frontendem
+bb42840 - Dominik Chrobak, 2 months ago : Merge pull request #6 from Cisaaaa/feat/logowanie-i-jwt
+b13876b - Dominik Chrobak, 2 months ago : feat: dodanie weryfikacji JWT i zabezpieczonej trasy /users/me
+3fc2d35 - Dominik Chrobak, 2 months ago : Merge pull request #5 from Cisaaaa/feat/logowanie-i-jwt
+a39af2d - Dominik Chrobak, 2 months ago : feat: dodanie logowania JWT i endpointu /login
+38008ff - Dominik Chrobak, 2 months ago : chore: dodanie bibliotek python-multipart i PyJWT do wymagan
+339c281 - Kacper Cisowski, 3 months ago : Merge pull request #4 from Cisaaaa/feat/auto-seeding
+c4fd152 - Kacper Cisowski, 3 months ago : feat: auto-seeding i poprawa rejestracji
+d68ff91 - Kacper Cisowski, 3 months ago : Merge pull request #3 from Cisaaaa/feat/rejestracja-uwierzytelnianie
+5df5384 - Kacper Cisowski, 3 months ago : feat: implementacja rejestracji użytkownika i haszowanie haseł bcrypt
+440aeb2 - Kacper Cisowski, 3 months ago : chore: dodanie biblioteki do bezpiecznego szyfrowania hasel
+c1ce98a - Dominik Chrobak, 3 months ago : Merge pull request #2 from Cisaaaa/feat/db-i-modele-uzytkownika
+aa6eddc - Dominik Chrobak, 3 months ago : fix: Poprawka w pliku main.py
+6b48f21 - Dominik Chrobak, 3 months ago : Merge pull request #1 from Cisaaaa/feat/db-i-modele-uzytkownika
+f0da2bb - Dominik Chrobak, 3 months ago : feat: konfiguracja bazy danych i wygenerowanie tabel User oraz Role
+8de6880 - Kacper Cisowski, 3 months ago : Utworzenie pliku example zmiennych docker-compose
+f310410 - Kacper Cisowski, 3 months ago : Konfiguracja środowiska Docker, FastAPI i Vue.js
+968f09b - Kacper Cisowski, 3 months ago : Dodanie package-lock.json
+13f3562 - Kacper Cisowski, 3 months ago : Init: Konfiguracja Docker Compose, FastAPI i Vue.js
+8f62ecf - Kacper Cisowski, 3 months ago : Utworzenie pliku .gitignore
+f29cba3 - Kacper Cisowski, 3 months ago : Initial commit
